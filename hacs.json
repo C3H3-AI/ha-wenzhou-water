@@ -1,0 +1,11 @@
+{
+  "name": "温州水务",
+  "content_in_root": false,
+  "filename": null,
+  "repository": "C3H3-AI/ha-wenzhou-water",
+  "country": ["cn"],
+  "homeassistant": "2024.1.0",
+  "hacs": "1.0.0",
+  "version": "0.0.2",
+  "render_jinja": true
+}
