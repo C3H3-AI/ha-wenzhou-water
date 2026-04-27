@@ -23,6 +23,8 @@ class WenzhouWaterAPI:
             "X-MCS-CHANNEL": "1",
             "x-web-xhr": "1",
             "x-3h-account-type": "mcs",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf254186b) XWEB/19481",
+            "Referer": "https://servicewechat.com/wxe8c4cb0f78106a50/43/page-frame.html",
         }
 
     async def _request(self, method: str, path: str, **kwargs) -> dict:
