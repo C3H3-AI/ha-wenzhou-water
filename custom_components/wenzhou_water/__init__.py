@@ -4,7 +4,7 @@ from homeassistant.core import HomeAssistant
 
 from .sensor import DOMAIN, async_setup_entry
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

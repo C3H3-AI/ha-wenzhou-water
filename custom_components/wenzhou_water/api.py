@@ -18,6 +18,7 @@ class WenzhouWaterAPI:
         self.access_token = access_token
         self._headers = {
             "Authorization": f"Bearer {access_token}",
+            "X-MCS-AUTH-TOKEN": access_token,
             "Content-Type": "application/json",
             "X-MCS-CHANNEL": "1",
             "x-web-xhr": "1",
