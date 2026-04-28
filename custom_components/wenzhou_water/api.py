@@ -1,6 +1,9 @@
-"""温州水务API客户端"""
+"""温州水务API客户端 - v1.1.0
+修复: get_bills 1月跨年bug, Token过期异常区分
+"""
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any
 
 import aiohttp
@@ -8,6 +11,9 @@ import aiohttp
 from .const import BASE_URL, API_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
+
+# API 返回的错误码，表示 Token 无效/过期
+TOKEN_EXPIRED_CODES = {401, 10001, 10002, 10003, 10401}
 
 
 class WenzhouWaterAPI:
@@ -34,11 +40,25 @@ class WenzhouWaterAPI:
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.request(method, url, headers=self._headers, **kwargs) as response:
+                    # 检查 HTTP 401
+                    if response.status == 401:
+                        raise WenzhouWaterTokenExpiredError("HTTP 401 - Token已失效")
+
                     data = await response.json()
-                    if data.get("code") != 0:
-                        _LOGGER.error(f"API error: {data.get('message')} (code={data.get('code')})")
-                        raise WenzhouWaterAPIError(data.get("message", "API error"), data.get("code"))
+                    code = data.get("code", 0)
+
+                    if code != 0:
+                        msg = data.get("message", "API error")
+                        _LOGGER.error(f"API error: {msg} (code={code})")
+                        # 检查是否 Token 过期相关错误码
+                        if code in TOKEN_EXPIRED_CODES:
+                            raise WenzhouWaterTokenExpiredError(msg, code)
+                        raise WenzhouWaterAPIError(msg, code)
+
                     return data.get("data", {})
+
+        except WenzhouWaterTokenExpiredError:
+            raise  # 直接上抛 Token 过期异常
         except aiohttp.ClientError as e:
             _LOGGER.error(f"Network error: {e}")
             raise WenzhouWaterAPIError(f"Network error: {e}", -1) from e
@@ -68,14 +88,22 @@ class WenzhouWaterAPI:
         return await self._request("GET", f"/meter-card/{card_id}/price-info")
 
     async def get_bills(self, card_id: str, start_month: str = None, end_month: str = None) -> list:
-        """获取账单列表 - 默认最近6个月"""
-        import datetime
-        now = datetime.datetime.now()
+        """获取账单列表 - 默认最近6个月
+
+        修复: 1月时 now.month - 5 为负数导致 ValueError 的 bug
+        使用手动月份进位替代简单减法
+        """
+        now = datetime.now()
         if not end_month:
             end_month = now.strftime("%Y%m")
         if not start_month:
-            # 默认获取最近6个月
-            start_month = (now.replace(month=max(1, now.month - 5))).strftime("%Y%m")
+            # 安全计算6个月前的月份（跨年正确）
+            year = now.year
+            month = now.month - 5
+            while month <= 0:
+                month += 12
+                year -= 1
+            start_month = f"{year}{month:02d}"
 
         return await self._request("GET", f"/meter-card/{card_id}/bills?startBM={start_month}&endBM={end_month}")
 
@@ -92,3 +120,10 @@ class WenzhouWaterAPIError(Exception):
         self.message = message
         self.code = code
         super().__init__(self.message)
+
+
+class WenzhouWaterTokenExpiredError(WenzhouWaterAPIError):
+    """Token过期异常 - 集成可据此设置 token_expired 状态"""
+
+    def __init__(self, message: str = "Token已过期", code: int = 401):
+        super().__init__(message, code)
