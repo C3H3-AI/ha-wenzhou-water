@@ -1,7 +1,9 @@
-"""温州水务配置流程 - v1.3.0
+"""温州水务配置流程 - v1.3.2
 修复:
   - 修复 OptionsFlow.__init__ 缺失导致 500 错误
+  - 修复 OptionsFlow self.config_entry -> self.entry 拼写错误
   - 支持多用户/多水表：可选择监控所有水表或指定水表
+  - 周期抓取改为数字输入框（1-31日）而非滑动条
 """
 import logging
 from typing import Any
@@ -10,6 +12,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, OptionsFlow, ConfigEntry
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.selector import selector
 
 from .api import WenzhouWaterAPI, WenzhouWaterTokenExpiredError
 from .const import (
@@ -137,14 +140,14 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             vol.Required(
                 CONF_SCAN_INTERVAL,
                 default=DEFAULT_SCAN_INTERVAL_VALUE,
-            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=31)),
+            ): selector({"number": {"min": 1, "max": 31, "mode": "box"}}),
         })
 
         return self.async_show_form(
             step_id="select_meter",
             data_schema=data_schema,
             errors=errors,
-            description_placeholders={"hint": "选择要监控的水表（可选择全部），并设置每月几号更新数据（1-31）"},
+            description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
         )
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -268,13 +271,14 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             vol.Required(
                 CONF_SCAN_INTERVAL,
                 default=current_day,
-            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=31)),
+            ): selector({"number": {"min": 1, "max": 31, "mode": "box"}}),
         })
 
         return self.async_show_form(
             step_id="reconfigure_select_meter",
             data_schema=data_schema,
             errors=errors,
+            description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
         )
 
     @staticmethod
@@ -304,21 +308,21 @@ class WenzhouWaterOptionsFlow(OptionsFlow):
                 user_input[CONF_SCAN_INTERVAL_UNIT] = "month"
                 return self.async_create_entry(title="", data=user_input)
 
-        current_day = self.config_entry.options.get(
+        current_day = self.entry.options.get(
             CONF_SCAN_INTERVAL,
-            self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_VALUE)
+            self.entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_VALUE)
         )
 
         data_schema = vol.Schema({
             vol.Required(
                 CONF_SCAN_INTERVAL,
                 default=current_day,
-            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=31)),
+            ): selector({"number": {"min": 1, "max": 31, "mode": "box"}}),
         })
 
         return self.async_show_form(
             step_id="init",
             data_schema=data_schema,
             errors=errors,
-            description_placeholders={"hint": "设置每月几号更新数据（1-31）"},
+            description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
         )
