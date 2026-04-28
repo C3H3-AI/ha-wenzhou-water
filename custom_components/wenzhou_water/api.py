@@ -4,7 +4,6 @@ import logging
 from typing import Any
 
 import aiohttp
-from homeassistant.core import HomeAssistant
 
 from .const import BASE_URL, API_TIMEOUT
 
@@ -32,13 +31,20 @@ class WenzhouWaterAPI:
         url = f"{BASE_URL}{path}"
         timeout = aiohttp.ClientTimeout(total=API_TIMEOUT)
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.request(method, url, headers=self._headers, **kwargs) as response:
-                data = await response.json()
-                if data.get("code") != 0:
-                    _LOGGER.error(f"API error: {data.get('message')} (code={data.get('code')})")
-                    raise Exception(data.get("message", "API error"))
-                return data.get("data", {})
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.request(method, url, headers=self._headers, **kwargs) as response:
+                    data = await response.json()
+                    if data.get("code") != 0:
+                        _LOGGER.error(f"API error: {data.get('message')} (code={data.get('code')})")
+                        raise WenzhouWaterAPIError(data.get("message", "API error"), data.get("code"))
+                    return data.get("data", {})
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Network error: {e}")
+            raise WenzhouWaterAPIError(f"Network error: {e}", -1) from e
+        except asyncio.TimeoutError as e:
+            _LOGGER.error(f"Request timeout: {e}")
+            raise WenzhouWaterAPIError("Request timeout", -2) from e
 
     async def get_user_info(self) -> dict:
         """获取用户信息"""
@@ -62,12 +68,14 @@ class WenzhouWaterAPI:
         return await self._request("GET", f"/meter-card/{card_id}/price-info")
 
     async def get_bills(self, card_id: str, start_month: str = None, end_month: str = None) -> list:
-        """获取账单列表"""
+        """获取账单列表 - 默认最近6个月"""
         import datetime
+        now = datetime.datetime.now()
         if not end_month:
-            end_month = datetime.datetime.now().strftime("%Y%m")
+            end_month = now.strftime("%Y%m")
         if not start_month:
-            start_month = datetime.datetime.now().replace(month=1).strftime("%Y%m")
+            # 默认获取最近6个月
+            start_month = (now.replace(month=max(1, now.month - 5))).strftime("%Y%m")
 
         return await self._request("GET", f"/meter-card/{card_id}/bills?startBM={start_month}&endBM={end_month}")
 
@@ -75,3 +83,12 @@ class WenzhouWaterAPI:
         """获取多卡静态信息"""
         data = await self._request("GET", "/meter-card/multi-card/static")
         return data if isinstance(data, list) else []
+
+
+class WenzhouWaterAPIError(Exception):
+    """温州水务API异常"""
+
+    def __init__(self, message: str, code: int = -1):
+        self.message = message
+        self.code = code
+        super().__init__(self.message)

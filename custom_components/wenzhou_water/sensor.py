@@ -1,11 +1,15 @@
 """温州水务传感器"""
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
 from .api import WenzhouWaterAPI
 from .const import (
@@ -13,9 +17,12 @@ from .const import (
     CONF_METER_CARD_ID,
     CONF_METER_CARD_NAME,
     CONF_METER_CARD_ADDRESS,
+    DEFAULT_SCAN_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+DOMAIN = "wenzhou_water"
 
 SENSOR_TYPES = {
     # 账户信息
@@ -90,12 +97,24 @@ SENSOR_TYPES = {
 }
 
 
+def get_scan_interval(entry: ConfigEntry) -> timedelta:
+    """从配置获取扫描间隔"""
+    # 优先从 options 获取（用户配置），否则使用 data 中的值，最后用默认值
+    scan_interval = entry.options.get("scan_interval")
+    if scan_interval is None:
+        scan_interval = entry.data.get("scan_interval", DEFAULT_SCAN_INTERVAL)
+    return timedelta(seconds=scan_interval)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     """设置传感器"""
     access_token = entry.data[CONF_ACCESS_TOKEN]
     card_id = entry.data[CONF_METER_CARD_ID]
 
+    # 创建 coordinator，设置自动刷新间隔
     coordinator = WenzhouWaterDataUpdateCoordinator(hass, access_token, card_id)
+    coordinator.update_interval = get_scan_interval(entry)
+
     await coordinator.async_config_entry_first_refresh()
 
     entities = []
@@ -115,8 +134,8 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             _LOGGER,
-            name="wenzhou_water",
-            update_interval=None,  # 手动控制更新
+            name=DOMAIN,
+            update_interval=None,  # 在 async_setup_entry 中设置
         )
 
     async def _async_update_data(self) -> dict:
@@ -139,21 +158,29 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 data["meter_station"] = meter_info.get("stationName")
                 data["customer_name"] = meter_info.get("customerName")
 
-            # 获取最新抄表数据
+            # 获取账单（主要数据源，包含最新抄表和账单信息）
+            bills = await self.api.get_bills(self.card_id)
+            if bills and len(bills) > 0:
+                bill = bills[0]
+                data["billing_month"] = bill.get("billingMonth")
+                data["price_type"] = bill.get("priceName")
+                data["last_reading"] = bill.get("lastReading")
+                data["current_reading"] = bill.get("reading")
+                data["water_used"] = bill.get("readWater")
+                data["bill_amount"] = bill.get("amount")
+                data["last_read_date"] = bill.get("lastReadDate")
+                data["current_read_date"] = bill.get("readDate")
+                data["due_date"] = bill.get("chargeLimitTime")
+                data["bills"] = bills
+
+            # 获取最新抄表数据（补充历史数据）
             last_reading = await self.api.get_last_reading(self.card_id)
             if last_reading:
-                data["last_reading"] = last_reading.get("lastReading")
-                data["current_reading"] = last_reading.get("reading")
-                data["water_used"] = last_reading.get("readWater")
-                data["bill_amount"] = last_reading.get("amount")
-                data["last_read_date"] = last_reading.get("lastReadDate")
-                data["current_read_date"] = last_reading.get("readDate")
-                data["due_date"] = last_reading.get("chargeLimitTime")
-                data["price_type"] = last_reading.get("priceName")
-
-            # 获取账单
-            bills = await self.api.get_bills(self.card_id)
-            data["bills"] = bills
+                # 仅补充字段，不覆盖 bills 数据
+                if "last_reading" not in data:
+                    data["last_reading"] = last_reading.get("lastReading")
+                if "water_used" not in data:
+                    data["water_used"] = last_reading.get("readWater")
 
             data["status"] = "ok"
             return data
@@ -163,10 +190,11 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             return {"status": "error", "error": str(e)}
 
 
-class WenzhouWaterSensor(Entity):
-    """温州水务传感器基类"""
+class WenzhouWaterSensor(CoordinatorEntity):
+    """温州水务传感器 - 继承CoordinatorEntity实现自动更新"""
 
     def __init__(self, coordinator: WenzhouWaterDataUpdateCoordinator, entry: ConfigEntry, sensor_id: str):
+        super().__init__(coordinator)  # 关键：必须调用super().__init__(coordinator)
         self.coordinator = coordinator
         self.entry = entry
         self.sensor_id = sensor_id
@@ -174,7 +202,7 @@ class WenzhouWaterSensor(Entity):
 
     @property
     def unique_id(self) -> str:
-        return f"wenzhou_water_{self.entry.data[CONF_METER_CARD_ID]}_{self.sensor_id}"
+        return f"{DOMAIN}_{self.entry.data[CONF_METER_CARD_ID]}_{self.sensor_id}"
 
     @property
     def device_info(self) -> dict:
@@ -187,9 +215,25 @@ class WenzhouWaterSensor(Entity):
             "model": "智能水表",
         }
 
-    async def async_update(self):
-        """更新传感器数据"""
-        await self.coordinator.async_request_refresh()
+    @property
+    def native_value(self):
+        """返回传感器状态值 - CoordinatorEntity会自动调用此属性"""
+        if not self.coordinator.data:
+            return None
+        # integration_status 返回状态字符串
+        if self.sensor_id == "integration_status":
+            return self.coordinator.data.get("status", "unknown")
+        return self.coordinator.data.get(self.sensor_id)
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """返回单位"""
+        return SENSOR_TYPES[self.sensor_id].get("unit")
+
+    @property
+    def icon(self) -> str | None:
+        """返回图标"""
+        return SENSOR_TYPES[self.sensor_id].get("icon")
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -197,8 +241,5 @@ class WenzhouWaterSensor(Entity):
         data = self.coordinator.data or {}
         return {
             "card_id": self.entry.data[CONF_METER_CARD_ID],
-            "last_update": data.get("last_update"),
+            "last_update": self.coordinator.last_update_success,
         }
-
-
-DOMAIN = "wenzhou_water"

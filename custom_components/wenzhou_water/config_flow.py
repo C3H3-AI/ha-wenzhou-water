@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
+from .api import WenzhouWaterAPI
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_METER_CARD_ID,
@@ -34,10 +35,20 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             if not access_token:
                 errors["base"] = "invalid_token"
             else:
-                # 保存token并进入下一步选择水表
-                await self.async_set_unique_id(access_token[:16])
-                self._access_token = access_token
-                return await self.async_step_select_meter()
+                # 立即验证token有效性
+                try:
+                    api = WenzhouWaterAPI(access_token)
+                    user_info = await api.get_user_info()
+                    if not user_info:
+                        errors["base"] = "invalid_token"
+                    else:
+                        # token有效，保存并进入下一步选择水表
+                        await self.async_set_unique_id(access_token[:16])
+                        self._access_token = access_token
+                        return await self.async_step_select_meter()
+                except Exception as e:
+                    _LOGGER.error(f"Token validation failed: {e}")
+                    errors["base"] = "invalid_token"
 
         data_schema = vol.Schema({
             vol.Required(CONF_ACCESS_TOKEN): str,
@@ -52,9 +63,11 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
 
     async def async_step_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
         """选择水表"""
-        from .api import WenzhouWaterAPI
-
         errors = {}
+
+        if not hasattr(self, "_access_token"):
+            return self.async_show_form(step_id="user", errors={"base": "missing_token"})
+
         api = WenzhouWaterAPI(self._access_token)
 
         try:
@@ -88,6 +101,9 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                             CONF_METER_CARD_NAME: selected_card.get("cardName"),
                             CONF_METER_CARD_ADDRESS: selected_card.get("cardAddress"),
                         },
+                        options={
+                            "scan_interval": DEFAULT_SCAN_INTERVAL,
+                        },
                     )
 
         data_schema = vol.Schema({
@@ -102,7 +118,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
 
     @staticmethod
     @callback
-    def async_get_options_flow(entry, add_suggested_values=True):
+    def async_get_options_flow(entry):
         """获取选项流程"""
         return WenzhouWaterOptionsFlow(entry)
 
@@ -110,20 +126,18 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
 class WenzhouWaterOptionsFlow(OptionsFlow):
     """温州水务选项流程"""
 
-    def __init__(self, entry):
-        self.entry = entry
-
     async def async_step_init(self, user_input: dict[str, Any] = None) -> FlowResult:
         """配置选项"""
         if user_input is not None:
+            # scan_interval 存入 options
             return self.async_create_entry(title="", data=user_input)
 
-        # 默认更新间隔为1小时
-        current_interval = self.entry.data.get("scan_interval", DEFAULT_SCAN_INTERVAL)
+        # 从 entry.options 读取当前值
+        current_interval = self.entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)
         current_hours = current_interval // 3600
 
         data_schema = vol.Schema({
-            vol.Required("scan_interval_hours", default=current_hours): vol.All(
+            vol.Required("scan_interval", default=current_hours): vol.All(
                 vol.Coerce(int),
                 vol.In([1, 2, 3, 6, 12, 24])
             ),

@@ -1,5 +1,4 @@
 """温州水务集成常量"""
-from homeassistant.const import CONF_COUNTRY_CODE
 
 # API配置
 BASE_URL = "https://sw-os.wzgytz.com/v3/open-api"
