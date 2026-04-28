@@ -13,6 +13,7 @@ CONF_ACCESS_TOKEN = "access_token"
 CONF_METER_CARD_ID = "meter_card_id"
 CONF_METER_CARD_NAME = "meter_card_name"
 CONF_METER_CARD_ADDRESS = "meter_card_address"
+CONF_METER_CARDS = "meter_cards"  # 多水表列表，每个元素为 {cardId, cardName, cardAddress}
 
 # 扫描间隔配置（仅支持月模式）
 CONF_SCAN_INTERVAL = "scan_interval"

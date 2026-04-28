@@ -1,10 +1,8 @@
-"""温州水务传感器 - v1.1.0
+"""温州水务传感器 - v1.3.0
 修复:
-  - 扫描间隔改为月模式 async_track_point_in_time（精确到每月X号）
-  - Sensor 继承 SensorEntity（参考华润燃气）
-  - 区分 TokenExpiredError 设置 token_expired 状态
-  - 去除 DEBUG 日志
-  - integration_status 中文映射
+  - 支持多用户/多水表：遍历所有配置的水表，为每个创建独立传感器组
+  - unique_id 包含 card_id 以区分不同水表的同一类传感器
+  - sensor entity 从 coordinator.data[card_id][sensor_type] 取值
 """
 import logging
 from datetime import timedelta, datetime
@@ -32,6 +30,7 @@ from .const import (
     CONF_METER_CARD_ID,
     CONF_METER_CARD_NAME,
     CONF_METER_CARD_ADDRESS,
+    CONF_METER_CARDS,
     CONF_SCAN_INTERVAL,
     CONF_SCAN_INTERVAL_UNIT,
     SCAN_INTERVAL_UNITS,
@@ -146,35 +145,61 @@ def _compute_next_monthly_run(day_of_month: int) -> datetime:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
-    """设置传感器（月模式调度 + CoordinatorEntity）"""
+    """设置传感器（支持多水表 + 月模式调度）"""
     _unsub_monthly = None  # 月度定时器句柄，避免重复注册
     access_token = entry.data[CONF_ACCESS_TOKEN]
-    card_id = entry.data[CONF_METER_CARD_ID]
 
-    # 获取月度更新日期（兼容 v1 无 scan_interval 的情况）
+    # 兼容旧格式：优先读取 meter_cards（列表），否则读取单个 meter_card_id
+    meter_cards_config = entry.data.get(CONF_METER_CARDS, [])
+    if meter_cards_config:
+        # 新格式：meter_cards 是列表
+        card_ids = [c["cardId"] for c in meter_cards_config]
+    else:
+        # 旧格式：只有单个 meter_card_id，转换为列表
+        card_id = entry.data.get(CONF_METER_CARD_ID)
+        card_name = entry.data.get(CONF_METER_CARD_NAME, "未知")
+        card_address = entry.data.get(CONF_METER_CARD_ADDRESS, "未知地址")
+        if card_id:
+            meter_cards_config = [{"cardId": card_id, "cardName": card_name, "cardAddress": card_address}]
+            card_ids = [card_id]
+        else:
+            meter_cards_config = []
+            card_ids = []
+
+    if not card_ids:
+        _LOGGER.error("温州水务：未找到任何水表配置，请重新配置集成")
+        return
+
+    _LOGGER.info(f"温州水务：检测到 {len(card_ids)} 个水表: {card_ids}")
+
+    # 获取月度更新日期
     day_of_month = entry.options.get(CONF_SCAN_INTERVAL)
     if day_of_month is None:
         day_of_month = entry.data.get(CONF_SCAN_INTERVAL, 1)
     if day_of_month is None:
-        day_of_month = 1  # 兜底默认
+        day_of_month = 1
     day_of_month = max(1, min(31, int(day_of_month)))
 
-    # 创建 coordinator（内部轮询间隔设为1小时作为兜底）
-    coordinator = WenzhouWaterDataUpdateCoordinator(hass, access_token, card_id)
+    # 创建 coordinator（支持多水表）
+    coordinator = WenzhouWaterDataUpdateCoordinator(hass, access_token, card_ids)
 
     # 首次刷新
     await coordinator.async_config_entry_first_refresh()
 
-    # 创建传感器实体
-    entities = [
-        WenzhouWaterSensor(coordinator, entry, sensor_id)
-        for sensor_id in SENSOR_TYPES
-    ]
+    # 为每个水表创建传感器实体
+    entities = []
+    for card_info in meter_cards_config:
+        card_id = card_info.get("cardId")
+        card_name = card_info.get("cardName", "未知")
+        for sensor_id in SENSOR_TYPES:
+            entities.append(
+                WenzhouWaterSensor(coordinator, entry, sensor_id, card_id, card_name)
+            )
+
     async_add_entities(entities)
 
     # ========== 月度定时调度 ==========
-    # 使用 async_track_point_in_time 在每月指定日期触发
-    async def _scheduled_update(self, now):
+    async def _scheduled_update(now):
         """定时触发数据刷新"""
         _LOGGER.info(f"温州水务月度定时刷新触发（每月{day_of_month}号）")
         await coordinator.async_request_refresh()
@@ -195,11 +220,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 
 class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
-    """温州水务数据更新协调器"""
+    """温州水务数据更新协调器（支持多水表）"""
 
-    def __init__(self, hass: HomeAssistant, access_token: str, card_id: str):
+    def __init__(self, hass: HomeAssistant, access_token: str, card_ids: list):
         self.api = WenzhouWaterAPI(access_token)
-        self.card_id = card_id
+        self.card_ids = card_ids  # 支持多水表
         super().__init__(
             hass,
             _LOGGER,
@@ -207,9 +232,9 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(hours=1),  # 兜底轮询间隔
         )
 
-    async def _async_update_data(self) -> dict:
-        """更新数据 - 各接口独立容错，任一失败不影响其他"""
-        result = {
+    def _make_card_result(self, card_id: str) -> dict:
+        """生成单个水表的默认数据结构"""
+        return {
             "account_balance": 0,
             "total_arrears": 0,
             "total_water": 0,
@@ -229,18 +254,28 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             "integration_status": "unknown",
         }
 
+    async def _async_update_data(self) -> dict:
+        """更新数据 - 每个水表独立获取，全局共享账户信息"""
+        # 结果结构: {card_id: {sensor_type: value}}
+        result = {}
+        for card_id in self.card_ids:
+            result[card_id] = self._make_card_result(card_id)
+
+        # 全局账户信息（从第一个水表获取）
         total_api_calls = 4
         error_count = 0
         token_expired = False
 
-        # 1. 获取账户静态信息
+        # 1. 获取账户静态信息（全局，共享）
         try:
             static_info = await self.api.get_multi_card_static()
             if static_info and len(static_info) > 0:
-                info = static_info[0]
-                result["account_balance"] = float(info.get("amount", 0) or 0)
-                result["total_arrears"] = float(info.get("totalLateFee", 0) or 0)
-                result["total_water"] = float(info.get("totalWater", 0) or 0)
+                for info in static_info:
+                    cid = info.get("cardId")
+                    if cid in result:
+                        result[cid]["account_balance"] = float(info.get("amount", 0) or 0)
+                        result[cid]["total_arrears"] = float(info.get("totalLateFee", 0) or 0)
+                        result[cid]["total_water"] = float(info.get("totalWater", 0) or 0)
         except WenzhouWaterTokenExpiredError as e:
             _LOGGER.error(f"Token已过期: {e}")
             token_expired = True
@@ -249,139 +284,147 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"获取账户静态信息失败: {e}")
             error_count += 1
 
-        # 2. 获取水表信息
-        try:
-            meter_info = await self.api.get_meter_card_info(self.card_id)
-            if meter_info:
-                result["meter_address"] = meter_info.get("cardAddress", "未知")
-                result["meter_station"] = meter_info.get("stationName", "未知")
-                result["customer_name"] = meter_info.get("customerName", "未知")
-        except WenzhouWaterTokenExpiredError as e:
-            _LOGGER.error(f"Token已过期: {e}")
-            token_expired = True
-            error_count += 1
-        except Exception as e:
-            _LOGGER.error(f"获取水表信息失败: {e}")
-            error_count += 1
+        # 2-4. 为每个水表获取独立数据
+        for card_id in self.card_ids:
+            card_result = result[card_id]
+            card_error_count = 0
 
-        # 3. 获取账单（主要数据源）
-        try:
-            bills = await self.api.get_bills(self.card_id)
-            if bills and len(bills) > 0:
-                bill = bills[0]
-                result["billing_month"] = bill.get("billingMonth", "未知")
-                result["price_type"] = bill.get("priceName", "未知")
-                result["last_reading"] = float(bill.get("lastReading", 0) or 0)
-                result["current_reading"] = float(bill.get("reading", 0) or 0)
-                result["water_used"] = float(bill.get("readWater", 0) or 0)
-                result["bill_amount"] = float(bill.get("amount", 0) or 0)
-                result["last_read_date"] = bill.get("lastReadDate", "未知")
-                result["current_read_date"] = bill.get("readDate", "未知")
-                result["due_date"] = bill.get("chargeLimitTime", "未知")
-        except WenzhouWaterTokenExpiredError as e:
-            _LOGGER.error(f"Token已过期: {e}")
-            token_expired = True
-            error_count += 1
-        except Exception as e:
-            _LOGGER.error(f"获取账单失败: {e}")
-            error_count += 1
+            # 2. 获取水表信息
+            try:
+                meter_info = await self.api.get_meter_card_info(card_id)
+                if meter_info:
+                    card_result["meter_address"] = meter_info.get("cardAddress", "未知")
+                    card_result["meter_station"] = meter_info.get("stationName", "未知")
+                    card_result["customer_name"] = meter_info.get("customerName", "未知")
+            except WenzhouWaterTokenExpiredError as e:
+                _LOGGER.error(f"Token已过期（{card_id}）: {e}")
+                token_expired = True
+                card_error_count += 1
+            except Exception as e:
+                _LOGGER.error(f"获取水表信息失败（{card_id}）: {e}")
+                card_error_count += 1
 
-        # 4. 获取最新抄表数据（补充）
-        try:
-            last_reading = await self.api.get_last_reading(self.card_id)
-            if last_reading:
-                if result.get("last_reading", 0) == 0:
-                    result["last_reading"] = float(last_reading.get("lastReading", 0) or 0)
-                if result.get("water_used", 0) == 0:
-                    result["water_used"] = float(last_reading.get("readWater", 0) or 0)
-        except WenzhouWaterTokenExpiredError as e:
-            _LOGGER.error(f"Token已过期: {e}")
-            token_expired = True
-            error_count += 1
-        except Exception as e:
-            _LOGGER.error(f"获取最新抄表数据失败: {e}")
-            error_count += 1
+            # 3. 获取账单
+            try:
+                bills = await self.api.get_bills(card_id)
+                if bills and len(bills) > 0:
+                    bill = bills[0]
+                    card_result["billing_month"] = bill.get("billingMonth", "未知")
+                    card_result["price_type"] = bill.get("priceName", "未知")
+                    card_result["last_reading"] = float(bill.get("lastReading", 0) or 0)
+                    card_result["current_reading"] = float(bill.get("reading", 0) or 0)
+                    card_result["water_used"] = float(bill.get("readWater", 0) or 0)
+                    card_result["bill_amount"] = float(bill.get("amount", 0) or 0)
+                    card_result["last_read_date"] = bill.get("lastReadDate", "未知")
+                    card_result["current_read_date"] = bill.get("readDate", "未知")
+                    card_result["due_date"] = bill.get("chargeLimitTime", "未知")
+            except WenzhouWaterTokenExpiredError as e:
+                _LOGGER.error(f"Token已过期（{card_id}）: {e}")
+                token_expired = True
+                card_error_count += 1
+            except Exception as e:
+                _LOGGER.error(f"获取账单失败（{card_id}）: {e}")
+                card_error_count += 1
 
-        # 判断集成状态
+            # 4. 获取最新抄表数据（补充）
+            try:
+                last_reading = await self.api.get_last_reading(card_id)
+                if last_reading:
+                    if card_result.get("last_reading", 0) == 0:
+                        card_result["last_reading"] = float(last_reading.get("lastReading", 0) or 0)
+                    if card_result.get("water_used", 0) == 0:
+                        card_result["water_used"] = float(last_reading.get("readWater", 0) or 0)
+            except WenzhouWaterTokenExpiredError as e:
+                _LOGGER.error(f"Token已过期（{card_id}）: {e}")
+                token_expired = True
+                card_error_count += 1
+            except Exception as e:
+                _LOGGER.error(f"获取最新抄表数据失败（{card_id}）: {e}")
+                card_error_count += 1
+
+            # 判断单个水表状态
+            if token_expired:
+                card_result["integration_status"] = "token_expired"
+                card_result["status"] = "error"
+            elif card_error_count >= total_api_calls:
+                card_result["integration_status"] = "api_error"
+                card_result["status"] = "error"
+            elif card_error_count > 0:
+                card_result["integration_status"] = "network_error"
+                card_result["status"] = "partial_error"
+            else:
+                card_result["integration_status"] = "normal"
+                card_result["status"] = "ok"
+
+        # 全局状态（任一水表有问题则全局有问题）
         if token_expired:
-            result["integration_status"] = "token_expired"
-            result["status"] = "error"
-            _LOGGER.critical("Token已过期，请重新配置集成！")
-        elif error_count >= total_api_calls:
-            result["integration_status"] = "api_error"
-            result["status"] = "error"
-            _LOGGER.critical(f"全部{total_api_calls}个API调用失败！")
-        elif error_count > 0:
-            result["integration_status"] = "network_error"
-            result["status"] = "partial_error"
-        else:
-            result["integration_status"] = "normal"
-            result["status"] = "ok"
+            for card_id in self.card_ids:
+                result[card_id]["integration_status"] = "token_expired"
+                result[card_id]["status"] = "error"
 
         _LOGGER.info(
-            f"温州水务数据更新完成: "
-            f"余额¥{result['account_balance']}, "
-            f"欠费¥{result['total_arrears']}, "
-            f"本期用水{result['water_used']}m³, "
-            f"状态={result['integration_status']}"
+            f"温州水务数据更新完成（{len(self.card_ids)}个水表）: "
+            f"状态={result[self.card_ids[0]]['integration_status'] if self.card_ids else 'unknown'}"
         )
         return result
 
 
 class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
-    """温州水务传感器 - 继承 SensorEntity + CoordinatorEntity"""
+    """温州水务传感器 - 继承 SensorEntity + CoordinatorEntity，支持多水表"""
 
-    def __init__(self, coordinator: WenzhouWaterDataUpdateCoordinator, entry: ConfigEntry, sensor_id: str):
+    def __init__(self, coordinator: WenzhouWaterDataUpdateCoordinator, entry: ConfigEntry,
+                 sensor_id: str, card_id: str, card_name: str):
         super().__init__(coordinator)
         self.coordinator = coordinator
         self.entry = entry
         self.sensor_id = sensor_id
+        self.card_id = card_id
+        self.card_name = card_name
         self._attr_has_entity_name = True
 
     @property
     def unique_id(self) -> str:
-        return f"{DOMAIN}_{self.entry.data[CONF_METER_CARD_ID]}_{self.sensor_id}"
+        # unique_id 包含 card_id，确保多水表时实体不冲突
+        return f"{DOMAIN}_{self.card_id}_{self.sensor_id}"
 
     @property
     def name(self) -> str:
-        return SENSOR_TYPES[self.sensor_id]["name"]
+        # 传感器名称包含水表名，便于区分
+        return f"{self.card_name} {SENSOR_TYPES[self.sensor_id]['name']}"
 
     @property
     def device_info(self) -> dict:
-        card_id = self.entry.data[CONF_METER_CARD_ID]
-        card_name = self.entry.data.get(CONF_METER_CARD_NAME, "未知")
         return {
-            "identifiers": {(DOMAIN, card_id)},
-            "name": f"温州水务 - {card_name}",
+            "identifiers": {(DOMAIN, self.card_id)},
+            "name": f"温州水务 - {self.card_name}",
             "manufacturer": "温州水务",
             "model": "智能水表",
         }
 
     @property
     def native_value(self):
-        """返回传感器状态值"""
+        """返回传感器状态值（从对应 card_id 的数据中取）"""
         if not self.coordinator.data:
             return None
-        value = self.coordinator.data.get(self.sensor_id)
-        return value
+        card_data = self.coordinator.data.get(self.card_id, {})
+        return card_data.get(self.sensor_id)
 
     @property
     def native_unit_of_measurement(self) -> str | None:
-        """返回单位"""
         return SENSOR_TYPES[self.sensor_id].get("unit")
 
     @property
     def icon(self) -> str | None:
-        """返回图标"""
         return SENSOR_TYPES[self.sensor_id].get("icon")
 
     @property
     def extra_state_attributes(self) -> dict:
         """额外状态属性"""
-        data = self.coordinator.data or {}
-        raw_status = data.get("integration_status", "unknown")
+        card_data = self.coordinator.data.get(self.card_id, {}) if self.coordinator.data else {}
+        raw_status = card_data.get("integration_status", "unknown")
         return {
-            "card_id": self.entry.data[CONF_METER_CARD_ID],
+            "card_id": self.card_id,
+            "card_name": self.card_name,
             "last_update": self.coordinator.last_update_success,
             "integration_status": raw_status,
             "integration_status_cn": INTEGRATION_STATUS.get(raw_status, raw_status),
@@ -397,6 +440,5 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
     async def async_added_to_hass(self):
         """添加到 Home Assistant - 避免初始 unknown"""
         await super().async_added_to_hass()
-        # CoordinatorEntity 已自动注册 listener，这里只需处理已有数据的情况
         if self.coordinator.data is not None:
             self.async_write_ha_state()

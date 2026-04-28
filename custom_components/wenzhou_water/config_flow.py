@@ -1,8 +1,7 @@
-"""温州水务配置流程 - v1.1.0
+"""温州水务配置流程 - v1.3.0
 修复:
-  - 简化扫描间隔只留月模式
-  - reconfigure 支持换水表
-  - token 字段脱敏
+  - 修复 OptionsFlow.__init__ 缺失导致 500 错误
+  - 支持多用户/多水表：可选择监控所有水表或指定水表
 """
 import logging
 from typing import Any
@@ -18,8 +17,8 @@ from .const import (
     CONF_METER_CARD_ID,
     CONF_METER_CARD_NAME,
     CONF_METER_CARD_ADDRESS,
+    CONF_METER_CARDS,
     CONF_SCAN_INTERVAL,
-    CONF_SCAN_INTERVAL_UNIT,
     SCAN_INTERVAL_UNITS,
     DEFAULT_SCAN_INTERVAL_VALUE,
     DEFAULT_SCAN_INTERVAL_UNIT,
@@ -38,7 +37,7 @@ def _validate_interval(value: int) -> str | None:
 class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
     """温州水务配置流程"""
 
-    VERSION = 2
+    VERSION = 3
 
     async def async_step_user(self, user_input: dict[str, Any] = None) -> FlowResult:
         """用户输入配置"""
@@ -76,7 +75,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
         )
 
     async def async_step_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
-        """选择水表并配置更新日期"""
+        """选择水表并配置更新日期（支持多水表）"""
         errors = {}
 
         if not hasattr(self, "_access_token"):
@@ -95,35 +94,46 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             return self.async_show_form(step_id="user", errors=errors)
 
         self._meter_cards = meter_cards
-        meter_options = {
-            card["cardId"]: f"{card.get('cardName', '未知')} - {card.get('cardAddress', '未知地址')}"
-            for card in meter_cards
-        }
+        # 构建选项：第一个为"全部水表"，后续为各水表
+        meter_options = {"__all__": f"全部水表（共{len(meter_cards)}个）"}
+        for card in meter_cards:
+            meter_options[card["cardId"]] = f"{card.get('cardName', '未知')} - {card.get('cardAddress', '未知地址')}"
 
         if user_input is not None:
-            selected_id = user_input.get(CONF_METER_CARD_ID)
+            selected = user_input.get(CONF_METER_CARD_ID)
             day_of_month = user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_VALUE)
 
             validation_error = _validate_interval(int(day_of_month))
             if validation_error:
                 errors[CONF_SCAN_INTERVAL] = validation_error
-            elif selected_id:
-                selected_card = next((c for c in meter_cards if c["cardId"] == selected_id), None)
-                if selected_card:
-                    return self.async_create_entry(
-                        title=f"温州水务 - {selected_card.get('cardName', selected_id)}",
-                        data={
-                            CONF_ACCESS_TOKEN: self._access_token,
-                            CONF_METER_CARD_ID: selected_id,
-                            CONF_METER_CARD_NAME: selected_card.get("cardName"),
-                            CONF_METER_CARD_ADDRESS: selected_card.get("cardAddress"),
-                            CONF_SCAN_INTERVAL: int(day_of_month),
-                            CONF_SCAN_INTERVAL_UNIT: "month",
-                        },
-                    )
+            elif selected:
+                # 收集选中的水表列表
+                if selected == "__all__":
+                    selected_cards = [
+                        {"cardId": c["cardId"], "cardName": c.get("cardName"), "cardAddress": c.get("cardAddress")}
+                        for c in meter_cards
+                    ]
+                    title = f"温州水务（{len(selected_cards)}个水表）"
+                else:
+                    card = next((c for c in meter_cards if c["cardId"] == selected), None)
+                    if card:
+                        selected_cards = [{"cardId": card["cardId"], "cardName": card.get("cardName"), "cardAddress": card.get("cardAddress")}]
+                        title = f"温州水务 - {card.get('cardName', selected)}"
+                    else:
+                        selected_cards = []
+
+                return self.async_create_entry(
+                    title=title,
+                    data={
+                        CONF_ACCESS_TOKEN: self._access_token,
+                        CONF_METER_CARDS: selected_cards,
+                        CONF_SCAN_INTERVAL: int(day_of_month),
+                        CONF_SCAN_INTERVAL_UNIT: "month",
+                    },
+                )
 
         data_schema = vol.Schema({
-            vol.Required(CONF_METER_CARD_ID): vol.In(meter_options),
+            vol.Required(CONF_METER_CARD_ID, default="__all__"): vol.In(meter_options),
             vol.Required(
                 CONF_SCAN_INTERVAL,
                 default=DEFAULT_SCAN_INTERVAL_VALUE,
@@ -134,7 +144,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             step_id="select_meter",
             data_schema=data_schema,
             errors=errors,
-            description_placeholders={"hint": "选择水表并设置每月几号更新数据（1-31）"},
+            description_placeholders={"hint": "选择要监控的水表（可选择全部），并设置每月几号更新数据（1-31）"},
         )
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -180,7 +190,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
         )
 
     async def async_step_reconfigure_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
-        """重新配置 - 选择水表和更新日期"""
+        """重新配置 - 选择水表和更新日期（支持多水表）"""
         reconfigure_entry = self._get_reconfigure_entry()
         errors = {}
 
@@ -199,43 +209,62 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             errors["base"] = "invalid_token"
             return self.async_show_form(step_id="reconfigure_select_meter", errors=errors)
 
-        meter_options = {
-            card["cardId"]: f"{card.get('cardName', '未知')} - {card.get('cardAddress', '未知地址')}"
-            for card in meter_cards
-        }
+        self._meter_cards = meter_cards
+        meter_options = {"__all__": f"全部水表（共{len(meter_cards)}个）"}
+        for card in meter_cards:
+            meter_options[card["cardId"]] = f"{card.get('cardName', '未知')} - {card.get('cardAddress', '未知地址')}"
 
         if user_input is not None:
-            selected_id = user_input.get(CONF_METER_CARD_ID)
+            selected = user_input.get(CONF_METER_CARD_ID)
             day_of_month = user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_VALUE)
 
             validation_error = _validate_interval(int(day_of_month))
             if validation_error:
                 errors[CONF_SCAN_INTERVAL] = validation_error
-            elif selected_id:
-                selected_card = next((c for c in meter_cards if c["cardId"] == selected_id), None)
-                if selected_card:
-                    final_data = {
-                        CONF_ACCESS_TOKEN: self._access_token,
-                        CONF_METER_CARD_ID: selected_id,
-                        CONF_METER_CARD_NAME: selected_card.get("cardName") if selected_card else None,
-                        CONF_METER_CARD_ADDRESS: selected_card.get("cardAddress") if selected_card else None,
-                        CONF_SCAN_INTERVAL: int(day_of_month),
-                        CONF_SCAN_INTERVAL_UNIT: "month",
-                    }
-                    return self.async_update_reload_and_abort(
-                        reconfigure_entry,
-                        data_updates=final_data,
-                    )
+            elif selected:
+                if selected == "__all__":
+                    selected_cards = [
+                        {"cardId": c["cardId"], "cardName": c.get("cardName"), "cardAddress": c.get("cardAddress")}
+                        for c in meter_cards
+                    ]
+                    title = f"温州水务（{len(selected_cards)}个水表）"
+                else:
+                    card = next((c for c in meter_cards if c["cardId"] == selected), None)
+                    if card:
+                        selected_cards = [{"cardId": card["cardId"], "cardName": card.get("cardName"), "cardAddress": card.get("cardAddress")}]
+                        title = f"温州水务 - {card.get('cardName', selected)}"
+                    else:
+                        selected_cards = []
+
+                final_data = {
+                    CONF_ACCESS_TOKEN: self._access_token,
+                    CONF_METER_CARDS: selected_cards,
+                    CONF_SCAN_INTERVAL: int(day_of_month),
+                    CONF_SCAN_INTERVAL_UNIT: "month",
+                }
+                return self.async_update_reload_and_abort(
+                    reconfigure_entry,
+                    data_updates=final_data,
+                    title=title,
+                )
 
         # 读取当前值
-        current_card_id = reconfigure_entry.data.get(CONF_METER_CARD_ID)
-        current_day = reconfigure_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_VALUE)
+        current_cards = reconfigure_entry.data.get(CONF_METER_CARDS, [])
+        current_day = reconfigure_entry.data.get(
+            CONF_SCAN_INTERVAL,
+            reconfigure_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_VALUE)
+        )
+        # 兼容旧格式
+        if isinstance(current_cards, list) and len(current_cards) > 0:
+            if len(current_cards) == len(meter_cards):
+                current_selection = "__all__"
+            else:
+                current_selection = current_cards[0].get("cardId", "__all__") if current_cards else "__all__"
+        else:
+            current_selection = "__all__"
 
         data_schema = vol.Schema({
-            vol.Required(
-                CONF_METER_CARD_ID,
-                default=current_card_id,
-            ): vol.In(meter_options),
+            vol.Required(CONF_METER_CARD_ID, default=current_selection): vol.In(meter_options),
             vol.Required(
                 CONF_SCAN_INTERVAL,
                 default=current_day,
@@ -257,6 +286,10 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
 
 class WenzhouWaterOptionsFlow(OptionsFlow):
     """温州水务选项流程 - 修改更新日期"""
+
+    def __init__(self, entry: ConfigEntry):
+        """初始化选项流程"""
+        self.entry = entry
 
     async def async_step_init(self, user_input: dict[str, Any] = None) -> FlowResult:
         """配置每月更新日期"""
