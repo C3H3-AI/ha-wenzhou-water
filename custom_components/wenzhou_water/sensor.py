@@ -109,6 +109,16 @@ SENSOR_TYPES = {
         "icon": "mdi:currency-cny",
         "unit": "¥/m³",
     },
+    "water_price_step2": {
+        "name": "二阶水价",
+        "icon": "mdi:currency-cny",
+        "unit": "¥/m³",
+    },
+    "water_price_step3": {
+        "name": "三阶水价",
+        "icon": "mdi:currency-cny",
+        "unit": "¥/m³",
+    },
     "water_price_sewage": {
         "name": "污水处理费",
         "icon": "mdi:recycle",
@@ -263,6 +273,10 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             "billing_month": "未知",
             "status": "unknown",
             "integration_status": "unknown",
+            "water_price_step1": 0,
+            "water_price_step2": 0,
+            "water_price_step3": 0,
+            "water_price_sewage": 0,
         }
 
     async def _async_update_data(self) -> dict:
@@ -333,18 +347,26 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     # 解析账单明细，提取单价
                     details = bill.get("details", [])
                     water_price_step1 = 0.0
+                    water_price_step2 = 0.0
+                    water_price_step3 = 0.0
                     water_price_sewage = 0.0
                     for detail in details:
                         pi_name = detail.get("piName", "")
                         level = detail.get("level", -1)
                         price = float(detail.get("price", 0) or 0)
-                        # 基本水价，取 level=1（一阶）
+                        # 基本水价，取 level=1/2/3（一阶/二阶/三阶）
                         if pi_name == "基本水价" and level == 1:
                             water_price_step1 = price
+                        elif pi_name == "基本水价" and level == 2:
+                            water_price_step2 = price
+                        elif pi_name == "基本水价" and level == 3:
+                            water_price_step3 = price
                         # 污水处理费，level=0
                         elif pi_name == "代收污水处理费" and level == 0:
                             water_price_sewage = price
                     card_result["water_price_step1"] = water_price_step1
+                    card_result["water_price_step2"] = water_price_step2
+                    card_result["water_price_step3"] = water_price_step3
                     card_result["water_price_sewage"] = water_price_sewage
             except WenzhouWaterTokenExpiredError as e:
                 _LOGGER.error(f"Token已过期（{card_id}）: {e}")
