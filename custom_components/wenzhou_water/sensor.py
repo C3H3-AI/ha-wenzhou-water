@@ -103,6 +103,17 @@ SENSOR_TYPES = {
         "icon": "mdi:currency-cny",
         "unit": None,
     },
+    # 单价（元/立方米）
+    "water_price_step1": {
+        "name": "一阶水价",
+        "icon": "mdi:currency-cny",
+        "unit": "¥/m³",
+    },
+    "water_price_sewage": {
+        "name": "污水处理费",
+        "icon": "mdi:recycle",
+        "unit": "¥/m³",
+    },
     # 状态
     "integration_status": {
         "name": "集成状态",
@@ -318,6 +329,23 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     card_result["last_read_date"] = bill.get("lastReadDate", "未知")
                     card_result["current_read_date"] = bill.get("readDate", "未知")
                     card_result["due_date"] = bill.get("chargeLimitTime", "未知")
+
+                    # 解析账单明细，提取单价
+                    details = bill.get("details", [])
+                    water_price_step1 = 0.0
+                    water_price_sewage = 0.0
+                    for detail in details:
+                        pi_name = detail.get("piName", "")
+                        level = detail.get("level", -1)
+                        price = float(detail.get("price", 0) or 0)
+                        # 基本水价，取 level=1（一阶）
+                        if pi_name == "基本水价" and level == 1:
+                            water_price_step1 = price
+                        # 污水处理费，level=0
+                        elif pi_name == "代收污水处理费" and level == 0:
+                            water_price_sewage = price
+                    card_result["water_price_step1"] = water_price_step1
+                    card_result["water_price_sewage"] = water_price_sewage
             except WenzhouWaterTokenExpiredError as e:
                 _LOGGER.error(f"Token已过期（{card_id}）: {e}")
                 token_expired = True
