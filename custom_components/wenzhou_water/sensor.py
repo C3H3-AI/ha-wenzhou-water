@@ -1,4 +1,9 @@
-"""温州水务传感器 - v1.7.0
+"""温州水务传感器 - v1.7.1
+修复 v1.7.1:
+  - 使用 price-info 接口获取真实阶梯数据，不再硬编码阈值
+  - 新增传感器: level_usage(一阶已用量), level_max(一阶上限), level_remaining(阶梯剩余量), person_count(家庭人口)
+  - 各阶梯价格从 price-info.items 获取，不再从账单推断
+  - 阶梯阈值直接使用 API 返回的 levelMax，不再计算
 新增 v1.7.0:
   - 新增阶梯水价解析（threshold1/2 一二阶阈值）
   - 新增阶梯用水量计算（step1_usage/step2_usage/step3_usage）
@@ -145,6 +150,27 @@ SENSOR_TYPES = {
         "name": "当前阶梯",
         "icon": "mdi:stairs",
         "unit": None,
+    },
+    # 阶梯详情（从 price-info 接口获取）
+    "level_usage": {
+        "name": "一阶已用量",
+        "icon": "mdi:numeric-1-box-outline",
+        "unit": "m³",
+    },
+    "level_max": {
+        "name": "一阶上限",
+        "icon": "mdi:stairs-up",
+        "unit": "m³",
+    },
+    "level_remaining": {
+        "name": "阶梯剩余量",
+        "icon": "mdi:water-outline",
+        "unit": "m³",
+    },
+    "person_count": {
+        "name": "家庭人口",
+        "icon": "mdi:account-group",
+        "unit": "人",
     },
     # 水表信息
     "meter_address": {
@@ -358,6 +384,12 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             "water_price_sewage": 0,
             "price_threshold1": 0,
             "price_threshold2": 0,
+            "price_threshold3": 0,
+            # 阶梯详情
+            "level_usage": 0,
+            "level_max": 0,
+            "level_remaining": 0,
+            "person_count": 0,
             # 阶梯用水量
             "step1_usage": 0,
             "step2_usage": 0,
@@ -554,13 +586,72 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.error(f"获取水表信息失败（{card_id}）: {e}")
                 card_error_count += 1
 
-            # 3. 获取账单
+            # 3.5 获取阶梯信息（从专用接口获取，优先级最高）
+            try:
+                price_info = await self.api.get_price_info(card_id)
+                if price_info:
+                    # 直接使用 API 返回的阶梯数据，不再用账单推断
+                    api_current_step = price_info.get("priceLevel", 1)
+                    level_usage = price_info.get("levelUsage", 0)
+                    level_max = price_info.get("levelMax", 240)
+                    person_count = price_info.get("personCount", 1)
+                    price_type = price_info.get("priceName", "未知")
+
+                    card_result["current_step"] = api_current_step
+                    card_result["level_usage"] = level_usage
+                    card_result["level_max"] = level_max
+                    card_result["level_remaining"] = max(0, level_max - level_usage)
+                    card_result["person_count"] = person_count
+                    card_result["price_type"] = price_type
+                    card_result["price_threshold1"] = level_max  # 一阶上限
+
+                    # 从 items 中提取各阶梯价格和阈值
+                    items = price_info.get("items", [])
+                    water_price_step1 = 0.0
+                    water_price_step2 = 0.0
+                    water_price_step3 = 0.0
+                    water_price_sewage = 0.0
+                    threshold2 = 0.0  # 二阶上限
+                    threshold3 = 0.0  # 三阶上限（0表示无上限）
+
+                    for item in items:
+                        pi_name = item.get("piName", "")
+                        level = item.get("level", -1)
+                        price = float(item.get("price", 0) or 0)
+                        if pi_name == "基本水价":
+                            if level == 1:
+                                water_price_step1 = price
+                            elif level == 2:
+                                water_price_step2 = price
+                                threshold2 = float(item.get("endWater", 0) or 0)  # 二阶上限
+                            elif level == 3:
+                                water_price_step3 = price
+                                threshold3 = float(item.get("endWater", 0) or 0)  # 三阶上限（-1表示无上限）
+                        elif pi_name == "代收污水处理费" and level == 0:
+                            water_price_sewage = price
+
+                    card_result["water_price_step1"] = water_price_step1
+                    card_result["water_price_step2"] = water_price_step2
+                    card_result["water_price_step3"] = water_price_step3
+                    card_result["water_price_sewage"] = water_price_sewage
+                    card_result["price_threshold2"] = threshold2  # 二阶上限
+                    card_result["price_threshold3"] = threshold3  # 三阶上限（0表示无上限）
+
+                    _LOGGER.debug(f"  阶梯信息: {card_id} - {price_type}, 当前{api_current_step}阶, 已用{level_usage}m³, 剩余{level_max - level_usage}m³")
+            except WenzhouWaterTokenExpiredError as e:
+                _LOGGER.error(f"Token已过期（{card_id}）: {e}")
+                token_expired = True
+                card_error_count += 1
+            except Exception as e:
+                _LOGGER.error(f"获取阶梯信息失败（{card_id}）: {e}")
+                card_error_count += 1
+
+            # 3. 获取账单（补充其他数据）
             try:
                 bills = await self.api.get_bills(card_id)
                 if bills and len(bills) > 0:
                     bill = bills[0]
                     card_result["billing_month"] = bill.get("billingMonth", "未知")
-                    card_result["price_type"] = bill.get("priceName", "未知")
                     card_result["last_reading"] = float(bill.get("lastReading", 0) or 0)
                     card_result["current_reading"] = float(bill.get("reading", 0) or 0)
                     card_result["water_used"] = float(bill.get("readWater", 0) or 0)
@@ -569,73 +660,18 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     card_result["current_read_date"] = bill.get("readDate", "未知")
                     card_result["due_date"] = bill.get("chargeLimitTime", "未知")
 
-                    # 解析账单明细，提取单价
-                    details = bill.get("details", [])
-                    water_price_step1 = 0.0
-                    water_price_step2 = 0.0
-                    water_price_step3 = 0.0
-                    water_price_sewage = 0.0
-                    price_threshold1 = 0.0
-                    price_threshold2 = 0.0
-
-                    for detail in details:
-                        pi_name = detail.get("piName", "")
-                        level = detail.get("level", -1)
-                        price = float(detail.get("price", 0) or 0)
-                        # 基本水价，取 level=1/2/3（一阶/二阶/三阶）
-                        if pi_name == "基本水价" and level == 1:
-                            water_price_step1 = price
-                            # 一阶阈值可能在 pi_range 或 startRange/endRange 中
-                            price_threshold1 = float(detail.get("piRange", detail.get("startRange", 0)) or 0)
-                        elif pi_name == "基本水价" and level == 2:
-                            water_price_step2 = price
-                            # 二阶阈值
-                            price_threshold2 = float(detail.get("piRange", detail.get("startRange", 0)) or 0)
-                        elif pi_name == "基本水价" and level == 3:
-                            water_price_step3 = price
-                        # 污水处理费，level=0
-                        elif pi_name == "代收污水处理费" and level == 0:
-                            water_price_sewage = price
-
-                    card_result["water_price_step1"] = water_price_step1
-                    card_result["water_price_step2"] = water_price_step2
-                    card_result["water_price_step3"] = water_price_step3
-                    card_result["water_price_sewage"] = water_price_sewage
-                    card_result["price_threshold1"] = price_threshold1
-                    card_result["price_threshold2"] = price_threshold2
-
-                    # 计算阶梯用水量
-                    water_used = card_result.get("water_used", 0)
-                    step1_usage = 0.0
-                    step2_usage = 0.0
-                    step3_usage = 0.0
-                    current_step = 1
-
-                    if water_used > 0:
-                        # 默认阈值（如果没有从 API 获取到）
-                        threshold1 = price_threshold1 if price_threshold1 > 0 else 17  # 一阶默认 0-17m³
-                        threshold2 = price_threshold2 if price_threshold2 > 0 else 30  # 二阶默认 17-30m³
-
-                        if water_used <= threshold1:
-                            # 纯一阶
-                            step1_usage = water_used
-                            current_step = 1
-                        elif water_used <= threshold2:
-                            # 一阶 + 二阶
-                            step1_usage = threshold1
-                            step2_usage = round(water_used - threshold1, 2)
-                            current_step = 2
-                        else:
-                            # 一阶 + 二阶 + 三阶
-                            step1_usage = threshold1
-                            step2_usage = round(threshold2 - threshold1, 2)
-                            step3_usage = round(water_used - threshold2, 2)
-                            current_step = 3
-
-                    card_result["step1_usage"] = step1_usage
-                    card_result["step2_usage"] = step2_usage
-                    card_result["step3_usage"] = step3_usage
-                    card_result["current_step"] = current_step
+                    # 账单中的阶梯信息仅作备用（如果 price-info 未获取到）
+                    if card_result.get("current_step") is None:
+                        import re
+                        price_name = bill.get("priceName", "")
+                        step_match = re.search(r'(\d)阶', price_name)
+                        card_result["current_step"] = int(step_match.group(1)) if step_match else 1
+                        card_result["price_type"] = price_name
+                        # 账单中没有阈值信息，设置默认值
+                        if card_result.get("price_threshold1") is None:
+                            card_result["price_threshold1"] = 240.0  # 默认一阶上限
+                            card_result["price_threshold2"] = 420.0  # 默认二阶上限
+                            card_result["price_threshold3"] = 0      # 无上限
             except WenzhouWaterTokenExpiredError as e:
                 _LOGGER.error(f"Token已过期（{card_id}）: {e}")
                 token_expired = True
