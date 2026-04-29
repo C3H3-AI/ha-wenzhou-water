@@ -1,8 +1,8 @@
-"""温州水务传感器 - v1.3.0
-修复:
-  - 支持多用户/多水表：遍历所有配置的水表，为每个创建独立传感器组
-  - unique_id 包含 card_id 以区分不同水表的同一类传感器
-  - sensor entity 从 coordinator.data[card_id][sensor_type] 取值
+"""温州水务传感器 - v1.4.0
+新增 v1.4.0:
+  - 新增传感器: 预估月用水量、账户预警、历史月均用水、与均值对比
+  - 新增历史数据持久化 (HA Storage)
+  - account_warning 动态图标 (正常/偏低/不足/为0四级)
 """
 import logging
 from datetime import timedelta, datetime
@@ -123,6 +123,27 @@ SENSOR_TYPES = {
         "name": "污水处理费",
         "icon": "mdi:recycle",
         "unit": "¥/m³",
+    },
+    # 预估与预警
+    "estimated_monthly_usage": {
+        "name": "预估月用水量",
+        "icon": "mdi:chart-line",
+        "unit": "m³",
+    },
+    "account_warning": {
+        "name": "账户预警",
+        "icon": "mdi:alert",
+        "unit": None,
+    },
+    "history_avg_usage": {
+        "name": "历史月均用水",
+        "icon": "mdi:history",
+        "unit": "m³",
+    },
+    "usage_vs_avg": {
+        "name": "与均值对比",
+        "icon": "mdi:percent",
+        "unit": "%",
     },
     # 状态
     "integration_status": {
@@ -277,7 +298,52 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             "water_price_step2": 0,
             "water_price_step3": 0,
             "water_price_sewage": 0,
+            "estimated_monthly_usage": 0,
+            "account_warning": "正常",
+            "history_avg_usage": 0,
+            "usage_vs_avg": 0,
         }
+
+    async def _load_billing_history(self, card_id: str) -> list:
+        """从 HA Storage 加载历史账单数据"""
+        try:
+            store = self.hass.helpers.store.Store(
+                key=f"{DOMAIN}_history_{card_id}",
+                atomic_update=True,
+            )
+            data = await store.async_load()
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    async def _save_billing_history(self, card_id: str, card_result: dict, existing_history: list) -> None:
+        """保存账单到历史记录（最多保留12个月）"""
+        try:
+            billing_month = card_result.get("billing_month", "")
+            if not billing_month or billing_month == "未知":
+                return
+
+            # 检查本月是否已记录
+            already_exists = any(h.get("billing_month") == billing_month for h in existing_history)
+            if not already_exists:
+                record = {
+                    "billing_month": billing_month,
+                    "water_used": card_result.get("water_used", 0),
+                    "bill_amount": card_result.get("bill_amount", 0),
+                }
+                existing_history.append(record)
+
+            # 只保留最近12个月
+            existing_history.sort(key=lambda x: x.get("billing_month", ""), reverse=True)
+            trimmed = existing_history[:12]
+
+            store = self.hass.helpers.store.Store(
+                key=f"{DOMAIN}_history_{card_id}",
+                atomic_update=True,
+            )
+            await store.async_save(trimmed)
+        except Exception as e:
+            _LOGGER.error(f"保存历史记录失败（{card_id}）: {e}")
 
     async def _async_update_data(self) -> dict:
         """更新数据 - 每个水表独立获取，全局共享账户信息"""
@@ -412,6 +478,55 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 result[card_id]["integration_status"] = "token_expired"
                 result[card_id]["status"] = "error"
 
+        # 计算新增传感器：预估月用水量、账户预警、历史均值
+        from datetime import datetime as dt
+        today = dt.now()
+        day_of_month = today.day
+        days_in_month = calendar.monthrange(today.year, today.month)[1]
+
+        for card_id in self.card_ids:
+            card_result = result[card_id]
+            current_usage = card_result.get("water_used", 0)
+
+            # 预估月用水量 = 当前用量 / 当天 × 月总天数
+            if day_of_month > 0 and current_usage > 0:
+                estimated = round(current_usage / day_of_month * days_in_month, 2)
+                card_result["estimated_monthly_usage"] = estimated
+            else:
+                card_result["estimated_monthly_usage"] = current_usage
+
+            # 账户预警
+            balance = card_result.get("account_balance", 0)
+            bill_amount = card_result.get("bill_amount", 0)
+            if balance <= 0:
+                card_result["account_warning"] = "余额为0，请及时充值"
+            elif balance < bill_amount:
+                card_result["account_warning"] = f"余额不足（余额¥{balance:.2f}）"
+            elif balance < 50:
+                card_result["account_warning"] = f"余额偏低（¥{balance:.2f}）"
+            else:
+                card_result["account_warning"] = "正常"
+
+            # 历史均值（通过 billing_history 计算）
+            history = await self._load_billing_history(card_id)
+            if history:
+                total = sum(h.get("water_used", 0) for h in history)
+                avg = round(total / len(history), 2) if history else 0
+                card_result["history_avg_usage"] = avg
+                # 与均值对比
+                if avg > 0:
+                    vs_pct = round((current_usage - avg) / avg * 100, 1)
+                    card_result["usage_vs_avg"] = vs_pct
+                else:
+                    card_result["usage_vs_avg"] = 0
+                # 更新历史记录
+                await self._save_billing_history(card_id, card_result, history)
+            else:
+                # 无历史，初始化
+                await self._save_billing_history(card_id, card_result, [])
+                card_result["history_avg_usage"] = current_usage
+                card_result["usage_vs_avg"] = 0
+
         _LOGGER.info(
             f"温州水务数据更新完成（{len(self.card_ids)}个水表）: "
             f"状态={result[self.card_ids[0]]['integration_status'] if self.card_ids else 'unknown'}"
@@ -457,7 +572,23 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
         if not self.coordinator.data:
             return None
         card_data = self.coordinator.data.get(self.card_id, {})
-        return card_data.get(self.sensor_id)
+        value = card_data.get(self.sensor_id)
+
+        # 对百分比类传感器做格式化
+        if self.sensor_id == "usage_vs_avg" and isinstance(value, (int, float)):
+            # 显示为带正负号的百分比
+            if value > 0:
+                return f"+{value:.1f}%"
+            elif value < 0:
+                return f"{value:.1f}%"
+            else:
+                return "0%"
+
+        # account_warning 返回字符串状态
+        if self.sensor_id == "account_warning":
+            return str(value) if value else "正常"
+
+        return value
 
     @property
     def native_unit_of_measurement(self) -> str | None:
@@ -465,7 +596,20 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def icon(self) -> str | None:
-        return SENSOR_TYPES[self.sensor_id].get("icon")
+        base_icon = SENSOR_TYPES[self.sensor_id].get("icon")
+        # account_warning 根据预警级别动态改图标
+        if self.sensor_id == "account_warning":
+            card_data = self.coordinator.data.get(self.card_id, {}) if self.coordinator.data else {}
+            warning = card_data.get("account_warning", "正常")
+            if "0" in warning or "余额为0" in warning:
+                return "mdi:alert-octagon"
+            elif "不足" in warning:
+                return "mdi:alert-circle"
+            elif "偏低" in warning:
+                return "mdi:alert"
+            else:
+                return "mdi:check-circle"
+        return base_icon
 
     @property
     def extra_state_attributes(self) -> dict:

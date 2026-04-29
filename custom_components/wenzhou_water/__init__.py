@@ -1,8 +1,9 @@
-"""温州水务Home Assistant集成 - v1.2.0
+"""温州水务Home Assistant集成 - v1.4.0
 
-修复:
-  - 添加 async_migrate_entry 处理 v1→v2 版本迁移
-  - scan_interval 缺失时自动补充默认值
+新增 v1.4.0:
+  - 新增传感器：预估月用水量、账户预警、历史月均用水、与均值对比
+  - 新增历史数据持久化（HA Storage，最多保留12个月）
+  - account_warning 动态图标（正常/偏低/不足/为0四级状态）
 """
 import logging
 
@@ -15,7 +16,7 @@ PLATFORMS = ["sensor"]
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
