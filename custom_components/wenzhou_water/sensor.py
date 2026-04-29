@@ -1,4 +1,7 @@
-"""温州水务传感器 - v1.7.1
+"""温州水务传感器 - v1.7.2
+修复 v1.7.2:
+  - 从账单 details[] 提取 step1/step2/step3_usage（pi=580 level 分组）
+  - 预估账单优先使用真实阶梯用量估算，更准确
 修复 v1.7.1:
   - 使用 price-info 接口获取真实阶梯数据，不再硬编码阈值
   - 新增传感器: level_usage(一阶已用量), level_max(一阶上限), level_remaining(阶梯剩余量), person_count(家庭人口)
@@ -350,12 +353,33 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
         self._history_init_flags = {card_id: False for card_id in card_ids}
         # 初始化锁：防止并发重复初始化
         self._history_init_locks = {card_id: asyncio.Lock() for card_id in card_ids}
+        # Store 实例缓存（避免 HA 2026.4 中 hass.helpers.store 访问方式变化的问题）
+        # 在 __init__ 中创建，保存到 hass.data 复用
+        self._history_stores: Dict[str, Any] = {}
+        for card_id in card_ids:
+            key = f"{DOMAIN}_history_{card_id}"
+            # 延迟到 hass 准备就绪时通过 property 访问器获取
+            self._history_stores[card_id] = None
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(hours=1),  # 兜底轮询间隔
         )
+
+    def _get_history_store(self, card_id: str):
+        """获取指定水表的历史 Store 实例（延迟初始化，复用）"""
+        if self._history_stores.get(card_id) is None:
+            try:
+                from homeassistant.helpers.store import Store
+                self._history_stores[card_id] = Store(
+                    hass=self.hass,
+                    key=f"{DOMAIN}_history_{card_id}",
+                )
+            except Exception as e:
+                _LOGGER.error(f"创建历史 Store 失败（{card_id}）: {e}")
+                return None
+        return self._history_stores[card_id]
 
     def _make_card_result(self, card_id: str) -> dict:
         """生成单个水表的默认数据结构"""
@@ -410,10 +434,9 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
     async def _load_billing_history(self, card_id: str) -> list:
         """从 HA Storage 加载历史账单数据"""
         try:
-            store = self.hass.helpers.store.Store(
-                key=f"{DOMAIN}_history_{card_id}",
-                atomic_update=True,
-            )
+            store = self._get_history_store(card_id)
+            if store is None:
+                return []
             data = await store.async_load()
             return data if isinstance(data, list) else []
         except Exception:
@@ -440,10 +463,9 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             existing_history.sort(key=lambda x: x.get("billing_month", ""), reverse=True)
             trimmed = existing_history[:12]
 
-            store = self.hass.helpers.store.Store(
-                key=f"{DOMAIN}_history_{card_id}",
-                atomic_update=True,
-            )
+            store = self._get_history_store(card_id)
+            if store is None:
+                return
             await store.async_save(trimmed)
         except Exception as e:
             _LOGGER.error(f"保存历史记录失败（{card_id}）: {e}")
@@ -526,11 +548,9 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
         # 保存到 Storage
         if result:
             try:
-                store = self.hass.helpers.store.Store(
-                    key=f"{DOMAIN}_history_{card_id}",
-                    atomic_update=True,
-                )
-                await store.async_save(result)
+                store = self._get_history_store(card_id)
+                if store:
+                    await store.async_save(result)
             except Exception as e:
                 _LOGGER.error(f"  保存历史账单失败: {e}")
 
@@ -660,6 +680,27 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     card_result["current_read_date"] = bill.get("readDate", "未知")
                     card_result["due_date"] = bill.get("chargeLimitTime", "未知")
 
+                    # 从账单 details[] 提取各阶梯用水量（pi=580 基本水价的 level 分组）
+                    step1_usage = 0.0
+                    step2_usage = 0.0
+                    step3_usage = 0.0
+                    details = bill.get("details", [])
+                    for d in details:
+                        level = int(d.get("level", 0) or 0)
+                        water = float(d.get("water", 0) or 0)
+                        pi = int(d.get("pi", 0) or 0)
+                        # 只取 pi=580（基本水价）的记录，其他 pi（污水处理/免税自来水）不参与阶梯计算
+                        if pi == 580:
+                            if level == 1:
+                                step1_usage += water
+                            elif level == 2:
+                                step2_usage += water
+                            elif level == 3:
+                                step3_usage += water
+                    card_result["step1_usage"] = round(step1_usage, 2)
+                    card_result["step2_usage"] = round(step2_usage, 2)
+                    card_result["step3_usage"] = round(step3_usage, 2)
+
                     # 账单中的阶梯信息仅作备用（如果 price-info 未获取到）
                     if card_result.get("current_step") is None:
                         import re
@@ -742,8 +783,18 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             threshold1 = card_result.get("price_threshold1", 17)
             threshold2 = card_result.get("price_threshold2", 30)
 
-            if estimated_usage > 0:
-                # 计算阶梯用量
+            # 优先使用账单中真实阶梯用量计算预估账单（更准确）
+            real_step1 = card_result.get("step1_usage", 0)
+            real_step2 = card_result.get("step2_usage", 0)
+            real_step3 = card_result.get("step3_usage", 0)
+            # 如果阶梯用量都>0，说明是真实数据，直接用；否则按预估用量估算
+            if real_step1 + real_step2 + real_step3 > 0:
+                s1 = real_step1
+                s2 = real_step2
+                s3 = real_step3
+                _LOGGER.debug(f"  预估账单使用账单阶梯用量: {card_id} - {s1}/{s2}/{s3}m³")
+            elif estimated_usage > 0:
+                # 按预估用量估算阶梯分段
                 if estimated_usage <= threshold1:
                     s1 = estimated_usage
                     s2 = 0
@@ -756,9 +807,13 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     s1 = threshold1
                     s2 = round(threshold2 - threshold1, 2)
                     s3 = round(estimated_usage - threshold2, 2)
-                # 预估账单 = 水费 + 污水处理费
+            else:
+                s1, s2, s3 = 0, 0, 0
+
+            if s1 + s2 + s3 > 0:
+                # 预估账单 = 水费 + 污水处理费（不含 pi=583 免税自来水）
                 estimated_water = s1 * price_step1 + s2 * price_step2 + s3 * price_step3
-                estimated_sewage = estimated_usage * price_sewage
+                estimated_sewage = (s1 + s2 + s3) * price_sewage
                 card_result["estimated_bill_amount"] = round(estimated_water + estimated_sewage, 2)
             else:
                 card_result["estimated_bill_amount"] = 0
@@ -884,14 +939,9 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
         if self.sensor_id == "current_step" and isinstance(value, int):
             return f"第{value}阶梯"
 
-        # usage_vs_avg 显示为带正负号的百分比
+        # usage_vs_avg 返回数值（unit="%"，HA 要求数值型传感器必须返回 float）
         if self.sensor_id == "usage_vs_avg" and isinstance(value, (int, float)):
-            if value > 0:
-                return f"+{value:.1f}%"
-            elif value < 0:
-                return f"{value:.1f}%"
-            else:
-                return "0%"
+            return round(float(value), 1)
 
         # account_warning 返回字符串状态
         if self.sensor_id == "account_warning":
