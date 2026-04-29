@@ -1,4 +1,6 @@
-"""温州水务传感器 - v1.7.5
+"""温州水务传感器 - v1.7.6
+修复 v1.7.6:
+  - 传感器命名更清晰：step1_usage 改为"本期一阶用水量"，level_usage 改为"累计一阶用水量"
 修复 v1.7.5:
   - 修复 items 未定义的 NameError bug
   - 修复 threshold1 过早引用问题（应在 items 解析后赋值）
@@ -160,7 +162,7 @@ SENSOR_TYPES = {
         "state_class": "measurement",
     },
     "step1_usage": {
-        "name": "一阶用水量",
+        "name": "本期一阶用水量",
         "icon": "mdi:numeric-1-box",
         "unit": "m³",
         "device_class": "water",
@@ -187,7 +189,7 @@ SENSOR_TYPES = {
     },
     # 阶梯详情（从 price-info 接口获取）
     "level_usage": {
-        "name": "一阶已用量",
+        "name": "累计一阶用水量",
         "icon": "mdi:numeric-1-box-outline",
         "unit": "m³",
         "device_class": "water",
