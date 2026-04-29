@@ -1,7 +1,10 @@
-"""温州水务配置流程 - v1.6.0
-新增 v1.6.0:
-  - 与 sensor.py v1.6.0 同步版本
-修复:
+"""温州水务配置流程 - v1.8.0
+新增 v1.8.0:
+  - 配置界面添加描述文案，提升用户引导体验
+  - Token 步骤：说明 Token 获取方式
+  - 水表选择步骤：说明轮询时间（每月 N 日 08:00）
+  - 选项配置步骤：说明修改后的生效时机
+v1.6.0:
   - 修复 OptionsFlow.__init__ 缺失导致 500 错误
   - 修复 OptionsFlow self.config_entry -> self.entry 拼写错误
   - 支持多用户/多水表：可选择监控所有水表或指定水表
@@ -78,6 +81,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             data_schema=data_schema,
             errors=errors,
             description_placeholders={"url": "https://github.com/C3H3-AI/ha-wenzhou-water"},
+            description="请输入温州水务的 Access Token。可在 [Token 获取文档]({{url}}) 查看获取方式。",
         )
 
     async def async_step_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -151,6 +155,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             data_schema=data_schema,
             errors=errors,
             description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
+            description="{{hint}}\n\n轮询说明：数据将在每月该日期的 08:00 自动刷新，无需手动操作。",
         )
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -193,6 +198,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             step_id="reconfigure",
             data_schema=reconfigure_schema,
             errors=errors,
+            description="如需更换 Token，请输入新的 Access Token。留空则保持当前 Token 不变。",
         )
 
     async def async_step_reconfigure_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -282,6 +288,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             data_schema=data_schema,
             errors=errors,
             description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
+            description="{{hint}}\n\n轮询说明：数据将在每月该日期的 08:00 自动刷新，无需手动操作。",
         )
 
     @staticmethod
@@ -328,4 +335,5 @@ class WenzhouWaterOptionsFlow(OptionsFlow):
             data_schema=data_schema,
             errors=errors,
             description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
+            description="{{hint}}\n\n修改后，下次轮询将按照新的日期执行。",
         )
