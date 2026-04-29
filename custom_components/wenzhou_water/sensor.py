@@ -1,4 +1,6 @@
-"""温州水务传感器 - v1.7.7
+"""温州水务传感器 - v1.7.8
+修复 v1.7.8:
+  - 命名统一：step2/3_usage 添加"本期"前缀（与 step1_usage 保持一致）
 修复 v1.7.7:
   - 命名更精确："累计一阶用水量"改为"本年累计一阶用水量"（避免误解为从用水开始的全部累计）
 修复 v1.7.6:
@@ -171,14 +173,14 @@ SENSOR_TYPES = {
         "state_class": "measurement",
     },
     "step2_usage": {
-        "name": "二阶用水量",
+        "name": "本期二阶用水量",
         "icon": "mdi:numeric-2-box",
         "unit": "m³",
         "device_class": "water",
         "state_class": "measurement",
     },
     "step3_usage": {
-        "name": "三阶用水量",
+        "name": "本期三阶用水量",
         "icon": "mdi:numeric-3-box",
         "unit": "m³",
         "device_class": "water",

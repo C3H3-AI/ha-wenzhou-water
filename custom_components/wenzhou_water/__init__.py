@@ -1,5 +1,7 @@
 """温州水务Home Assistant集成 - v1.7.7
 
+修复 v1.7.8:
+  - 传感器命名统一：step2/3_usage 添加"本期"前缀
 修复 v1.7.7:
   - 传感器命名更精确："累计一阶用水量"改为"本年累计一阶用水量"
 修复 v1.7.6:
@@ -47,7 +49,7 @@ PLATFORMS = ["sensor", "button"]
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "1.7.7"
+__version__ = "1.7.8"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
