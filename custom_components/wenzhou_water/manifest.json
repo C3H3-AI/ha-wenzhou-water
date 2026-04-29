@@ -7,11 +7,5 @@
   "requirements": [],
   "codeowners": ["@C3H3-AI"],
   "integration_type": "device",
-  "iot_class": "cloud_polling",
-  "frontend": [
-    {
-      "type": "module",
-      "url": "/community/wenzhou-water-card/wenzhou-water-card.js"
-    }
-  ]
+  "iot_class": "cloud_polling"
 }
