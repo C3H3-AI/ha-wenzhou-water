@@ -1,4 +1,6 @@
-"""温州水务传感器 - v1.7.8
+"""温州水务传感器 - v1.7.9
+修复 v1.7.9:
+  - 新增传感器：下次轮询时间（显示下次月度调度刷新时间）
 修复 v1.7.8:
   - 命名统一：step2/3_usage 添加"本期"前缀（与 step1_usage 保持一致）
 修复 v1.7.7:
@@ -283,6 +285,11 @@ SENSOR_TYPES = {
         "icon": "mdi:clock-outline",
         "unit": None,
     },
+    "next_poll_time": {
+        "name": "下次轮询时间",
+        "icon": "mdi:clock-next",
+        "unit": None,
+    },
 }
 
 
@@ -355,7 +362,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     day_of_month = max(1, min(31, int(day_of_month)))
 
     # 创建 coordinator（支持多水表）
-    coordinator = WenzhouWaterDataUpdateCoordinator(hass, access_token, card_ids)
+    coordinator = WenzhouWaterDataUpdateCoordinator(hass, access_token, card_ids, day_of_month)
 
     # 首次刷新
     await coordinator.async_config_entry_first_refresh()
@@ -396,9 +403,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
     """温州水务数据更新协调器（支持多水表）"""
 
-    def __init__(self, hass: HomeAssistant, access_token: str, card_ids: list):
+    def __init__(self, hass: HomeAssistant, access_token: str, card_ids: list, day_of_month: int = 1):
         self.api = WenzhouWaterAPI(access_token)
         self.card_ids = card_ids  # 支持多水表
+        self.day_of_month = day_of_month  # 保存月度调度日期
         # 历史初始化标志：避免每次刷新都重复触发批量初始化
         self._history_init_flags = {card_id: False for card_id in card_ids}
         # 初始化锁：防止并发重复初始化
@@ -479,6 +487,7 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             "usage_vs_avg": 0,
             # 诊断
             "last_update_time": "未知",
+            "next_poll_time": "未知",
         }
 
     async def _load_billing_history(self, card_id: str) -> list:
@@ -957,10 +966,13 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 card_result["history_avg_usage"] = current_usage
                 card_result["usage_vs_avg"] = 0
 
-        # 设置最后更新时间（所有水表统一）
+        # 设置最后更新时间和下次轮询时间（所有水表统一）
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        next_poll = _compute_next_monthly_run(self.day_of_month)
+        next_poll_str = next_poll.strftime("%Y-%m-%d %H:%M:%S")
         for card_id in self.card_ids:
             result[card_id]["last_update_time"] = now_str
+            result[card_id]["next_poll_time"] = next_poll_str
 
         _LOGGER.info(
             f"温州水务数据更新完成（{len(self.card_ids)}个水表）: "

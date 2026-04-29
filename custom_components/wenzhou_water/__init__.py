@@ -1,5 +1,7 @@
-"""温州水务Home Assistant集成 - v1.7.7
+"""温州水务Home Assistant集成 - v1.7.9
 
+修复 v1.7.9:
+  - 新增传感器：下次轮询时间（显示下次月度调度刷新时间）
 修复 v1.7.8:
   - 传感器命名统一：step2/3_usage 添加"本期"前缀
 修复 v1.7.7:
@@ -49,7 +51,7 @@ PLATFORMS = ["sensor", "button"]
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "1.7.8"
+__version__ = "1.7.9"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
