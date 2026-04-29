@@ -1,10 +1,18 @@
 # 温州水务 Home Assistant 集成
 
-![Version](https://img.shields.io/badge/version-v1.3.5-blue)
+![Version](https://img.shields.io/badge/version-v1.4.0-blue)
 ![HA Version](https://img.shields.io/badge/Home%20Assistant-2026.4%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
-通过 Home Assistant 集成查看水务账单、用水量、水价、欠费等信息。支持多水表。
+通过 Home Assistant 集成查看水务账单、用水量、水价、欠费等信息。支持多水表、历史趋势分析、账户预警。
+
+## 功能亮点
+
+- 多水表支持 - 同时监控多个水表
+- 预估月用水量 - 根据当前进度推算月度用水
+- 账户预警 - 余额不足/偏低实时提醒
+- 历史趋势 - 最多保留12个月用水记录
+- 自定义卡片 - Grid 四列布局，状态一目了然
 
 ## 安装
 
@@ -40,44 +48,71 @@ cp -r wenzhou_water ~/.homeassistant/custom_components/
 
 ## 传感器
 
-安装后为每个水表创建以下传感器：
+安装后为每个水表创建以下传感器（共22个）：
 
-### 账单与余额
+### 账户与余额
 | 传感器实体 | 说明 | 单位 |
 |------------|------|------|
-| `sensor.wenzhou_water_account_balance` | 账户余额 | ¥ |
-| `sensor.wenzhou_water_total_arrears` | 总欠费 | ¥ |
-| `sensor.wenzhou_water_bill_amount` | 账单金额 | ¥ |
+| `sensor.wenzhou_water_{cardId}_account_balance` | 账户余额 | ¥ |
+| `sensor.wenzhou_water_{cardId}_total_arrears` | 总欠费 | ¥ |
 
-### 用水量
+### 账单信息
 | 传感器实体 | 说明 | 单位 |
 |------------|------|------|
-| `sensor.wenzhou_water_last_reading` | 上期读数 | m³ |
-| `sensor.wenzhou_water_current_reading` | 本期读数 | m³ |
-| `sensor.wenzhou_water_water_used` | 本期用水量 | m³ |
+| `sensor.wenzhou_water_{cardId}_bill_amount` | 账单金额 | ¥ |
+| `sensor.wenzhou_water_{cardId}_last_reading` | 上期读数 | m³ |
+| `sensor.wenzhou_water_{cardId}_current_reading` | 本期读数 | m³ |
+| `sensor.wenzhou_water_{cardId}_water_used` | 本期用水量 | m³ |
+| `sensor.wenzhou_water_{cardId}_last_read_date` | 上期抄表日期 | - |
+| `sensor.wenzhou_water_{cardId}_current_read_date` | 本期抄表日期 | - |
+| `sensor.wenzhou_water_{cardId}_due_date` | 缴费截止日期 | - |
 
-### 抄表日期
+### 用水分析（v1.4.0 新增）
+| 传感器实体 | 说明 | 单位 |
+|------------|------|------|
+| `sensor.wenzhou_water_{cardId}_estimated_monthly_usage` | 预估月用水量 | m³ |
+| `sensor.wenzhou_water_{cardId}_history_avg_usage` | 历史月均用水 | m³ |
+| `sensor.wenzhou_water_{cardId}_usage_vs_avg` | 与均值对比 | % |
+
+### 账户预警（v1.4.0 新增）
 | 传感器实体 | 说明 |
 |------------|------|
-| `sensor.wenzhou_water_last_read_date` | 上期抄表日期 |
-| `sensor.wenzhou_water_current_read_date` | 本期抄表日期 |
-| `sensor.wenzhou_water_due_date` | 缴费截止日期 |
+| `sensor.wenzhou_water_{cardId}_account_warning` | 账户预警状态 |
 
-### 水价（阶梯价格）
+### 水价阶梯
 | 传感器实体 | 说明 | 单位 |
 |------------|------|------|
-| `sensor.wenzhou_water_water_price_step1` | 一阶水价 | ¥/m³ |
-| `sensor.wenzhou_water_water_price_step2` | 二阶水价 | ¥/m³ |
-| `sensor.wenzhou_water_water_price_step3` | 三阶水价 | ¥/m³ |
-| `sensor.wenzhou_water_water_price_sewage` | 污水处理费 | ¥/m³ |
+| `sensor.wenzhou_water_{cardId}_water_price_step1` | 一阶水价 | ¥/m³ |
+| `sensor.wenzhou_water_{cardId}_water_price_step2` | 二阶水价 | ¥/m³ |
+| `sensor.wenzhou_water_{cardId}_water_price_step3` | 三阶水价 | ¥/m³ |
+| `sensor.wenzhou_water_{cardId}_water_price_sewage` | 污水处理费 | ¥/m³ |
 
 ### 水表信息
 | 传感器实体 | 说明 |
 |------------|------|
-| `sensor.wenzhou_water_meter_address` | 用水地址 |
-| `sensor.wenzhou_water_meter_station` | 所属营业厅 |
-| `sensor.wenzhou_water_price_type` | 水价类型 |
-| `sensor.wenzhou_water_integration_status` | 集成状态 |
+| `sensor.wenzhou_water_{cardId}_meter_address` | 用水地址 |
+| `sensor.wenzhou_water_{cardId}_meter_station` | 所属营业厅 |
+| `sensor.wenzhou_water_{cardId}_price_type` | 水价类型 |
+| `sensor.wenzhou_water_{cardId}_integration_status` | 集成状态 |
+
+## Lovelace 卡片
+
+集成自带自定义卡片，安装后可直接使用：
+
+```yaml
+# 示例：在仪表盘添加温州水务卡片
+views:
+  - cards:
+      - type: custom:wenzhou-water-card
+        entity: sensor.wenzhou_water_xxx_account_balance
+        title: 温州水务
+```
+
+卡片特性：
+- 四列 Grid 布局：余额、用水、账单、预估
+- 二级信息行：预警状态、均值对比、截止日期
+- 状态指示灯：正常（绿）/警告（橙）/错误（红）
+- hover 动效与渐变背景
 
 ## 配置选项
 
@@ -95,16 +130,42 @@ automation:
   - alias: "水费欠费提醒"
     trigger:
       - platform: state
-        entity_id: sensor.wenzhou_water_total_arrears
+        entity_id: sensor.wenzhou_water_xxx_total_arrears
     condition:
       - condition: numeric_state
-        entity_id: sensor.wenzhou_water_total_arrears
+        entity_id: sensor.wenzhou_water_xxx_total_arrears
         above: 0
     action:
       - service: notify.notify
         data:
-          message: "您有水费欠费 ¥{{ states('sensor.wenzhou_water_total_arrears') }}"
+          message: "您有水费欠费 ¥{{ states('sensor.wenzhou_water_xxx_total_arrears') }}"
+
+# 账户余额预警（v1.4.0）
+automation:
+  - alias: "账户余额偏低提醒"
+    trigger:
+      - platform: state
+        entity_id: sensor.wenzhou_water_xxx_account_warning
+    condition:
+      - condition: template
+        value_template: "{{ '正常' not in states('sensor.wenzhou_water_xxx_account_warning') }}"
+    action:
+      - service: notify.notify
+        data:
+          message: "水务账户预警：{{ states('sensor.wenzhou_water_xxx_account_warning') }}"
 ```
+
+## 更新日志
+
+### v1.4.0 (2026-04-29)
+- ✨ 新增 3 个传感器：预估月用水量、账户预警、历史月均用水
+- ✨ 新增 `usage_vs_avg` 传感器显示与历史均值对比
+- 💾 数据持久化：历史记录保存至 HA Storage，最多保留12个月
+- 🎨 新增 Lovelace 自定义卡片 `wenzhou-water-card`
+- ⚡ account_warning 动态图标（正常/偏低/不足/为0四级）
+
+### v1.3.5
+- 修复账单明细缺少二阶/三阶水价解析
 
 ## 故障排除
 
