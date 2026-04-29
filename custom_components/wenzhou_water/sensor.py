@@ -1,7 +1,8 @@
-"""温州水务传感器 - v1.7.2
-修复 v1.7.2:
-  - 从账单 details[] 提取 step1/step2/step3_usage（pi=580 level 分组）
-  - 预估账单优先使用真实阶梯用量估算，更准确
+"""温州水务传感器 - v1.7.4
+修复 v1.7.4:
+  - 从 price-info items[] 解析二阶/三阶阈值（priceThreshold2/3 通常为 None）
+修复 v1.7.3:
+  - 从账单 details[] 兜底提取阶梯价格（某些水表 price-info 不返回 priceStep1/2/3）
 修复 v1.7.1:
   - 使用 price-info 接口获取真实阶梯数据，不再硬编码阈值
   - 新增传感器: level_usage(一阶已用量), level_max(一阶上限), level_remaining(阶梯剩余量), person_count(家庭人口)
@@ -623,26 +624,31 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     card_result["level_remaining"] = max(0, level_max - level_usage)
                     card_result["person_count"] = person_count
                     card_result["price_type"] = price_type
-                    card_result["price_threshold1"] = level_max  # 一阶上限
+                    card_result["price_threshold1"] = threshold1  # 一阶上限（从 items[level=1].endWater 解析）
 
                     # 从 price-info 顶层字段读取阶梯价格
                     # API 返回 priceStep1/priceStep2/priceStep3 在顶层，不在 items 中
                     water_price_step1 = float(price_info.get("priceStep1", 0) or 0)
                     water_price_step2 = float(price_info.get("priceStep2", 0) or 0)
                     water_price_step3 = float(price_info.get("priceStep3", 0) or 0)
-                    water_price_sewage = 0.0
 
-                    # 从 items 中补充解析（用于提取污水处理费）
-                    items = price_info.get("items", [])
+                    # 从 items 中解析阶梯阈值和污水处理费（顶层的 priceThreshold2/3 通常为 None）
+                    threshold1 = float(price_info.get("levelMax", 0) or 0)  # 兜底
+                    threshold2 = 0.0
+                    threshold3 = 0.0
+                    water_price_sewage = 0.0
                     for item in items:
                         pi_name = item.get("piName", "")
-                        level = item.get("level", -1)
-                        if pi_name == "代收污水处理费" and level == 0:
+                        level = int(item.get("level", -1) or -1)
+                        end_water = float(item.get("endWater", -1) or -1)
+                        if level == 1:
+                            threshold1 = float(item.get("endWater", 0) or 0)
+                        elif level == 2:
+                            threshold2 = float(item.get("endWater", 0) or 0)
+                        elif level == 3:
+                            threshold3 = float(item.get("endWater", 0) or 0) if end_water > 0 else 0
+                        elif pi_name == "代收污水处理费" and level == 0:
                             water_price_sewage = float(item.get("price", 0) or 0)
-
-                    # 阈值从 bills API 或 API 返回获取（暂设默认值）
-                    threshold2 = float(price_info.get("priceThreshold2", 0) or 0)
-                    threshold3 = float(price_info.get("priceThreshold3", 0) or 0)
 
                     card_result["water_price_step1"] = water_price_step1
                     card_result["water_price_step2"] = water_price_step2
@@ -675,25 +681,48 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     card_result["due_date"] = bill.get("chargeLimitTime", "未知")
 
                     # 从账单 details[] 提取各阶梯用水量（pi=580 基本水价的 level 分组）
+                    # 同时提取阶梯单价（兜底：某些水表 price-info 不返回 priceStep1/2/3）
                     step1_usage = 0.0
                     step2_usage = 0.0
                     step3_usage = 0.0
+                    bill_step1_price = 0.0
+                    bill_step2_price = 0.0
+                    bill_step3_price = 0.0
+                    bill_sewage_price = 0.0
                     details = bill.get("details", [])
                     for d in details:
                         level = int(d.get("level", 0) or 0)
                         water = float(d.get("water", 0) or 0)
+                        price = float(d.get("price", 0) or 0)
                         pi = int(d.get("pi", 0) or 0)
-                        # 只取 pi=580（基本水价）的记录，其他 pi（污水处理/免税自来水）不参与阶梯计算
+                        pi_name = d.get("piName", "")
+                        # 基本水价 (pi=580) 的阶梯信息
                         if pi == 580:
                             if level == 1:
                                 step1_usage += water
+                                bill_step1_price = price
                             elif level == 2:
                                 step2_usage += water
+                                bill_step2_price = price
                             elif level == 3:
                                 step3_usage += water
+                                bill_step3_price = price
+                        # 污水处理费 (pi=581)
+                        elif pi == 581 and level == 0:
+                            bill_sewage_price = price
                     card_result["step1_usage"] = round(step1_usage, 2)
                     card_result["step2_usage"] = round(step2_usage, 2)
                     card_result["step3_usage"] = round(step3_usage, 2)
+
+                    # 兜底：如果 price-info 未返回阶梯价格，从账单 details 提取
+                    if card_result.get("water_price_step1", 0) == 0 and bill_step1_price > 0:
+                        card_result["water_price_step1"] = bill_step1_price
+                    if card_result.get("water_price_step2", 0) == 0 and bill_step2_price > 0:
+                        card_result["water_price_step2"] = bill_step2_price
+                    if card_result.get("water_price_step3", 0) == 0 and bill_step3_price > 0:
+                        card_result["water_price_step3"] = bill_step3_price
+                    if card_result.get("water_price_sewage", 0) == 0 and bill_sewage_price > 0:
+                        card_result["water_price_sewage"] = bill_sewage_price
 
                     # 账单中的阶梯信息仅作备用（如果 price-info 未获取到）
                     if card_result.get("current_step") is None:
