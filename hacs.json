@@ -6,6 +6,6 @@
   "country": ["cn"],
   "homeassistant": "2024.1.0",
   "hacs": "1.0.0",
-  "version": "0.1.0",
+  "version": "1.3.5",
   "render_jinja": true
 }
