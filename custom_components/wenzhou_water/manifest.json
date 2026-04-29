@@ -1,7 +1,7 @@
 {
   "domain": "wenzhou_water",
   "name": "温州水务",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "config_flow": true,
   "documentation": "https://github.com/C3H3-AI/ha-wenzhou-water",
   "requirements": [],
@@ -10,5 +10,10 @@
   "iot_class": "cloud_polling",
   "exports": {
     "PLATFORMS": ["sensor", "button"]
+  },
+  "codewind_card": {
+    "path": "../www/community/wenzhou-water-card/wenzhou-water-card.js",
+    "title": "温州水务卡片",
+    "description": "展示水务数据、阶梯用水量、账户余额等"
   }
 }
