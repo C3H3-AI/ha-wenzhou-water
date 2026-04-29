@@ -1,14 +1,13 @@
 {
   "domain": "wenzhou_water",
   "name": "温州水务",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "config_flow": true,
   "documentation": "https://github.com/C3H3-AI/ha-wenzhou-water",
   "requirements": [],
   "codeowners": ["@C3H3-AI"],
   "integration_type": "device",
   "iot_class": "cloud_polling",
-  "icon": "custom_components/wenzhou_water/icon.png",
   "exports": {
     "PLATFORMS": ["sensor", "button"]
   }
