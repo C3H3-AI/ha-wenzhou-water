@@ -1,5 +1,10 @@
 /**
- * 温州水务 Lovelace 自定义卡片 - v1.4.0
+ * 温州水务 Lovelace 自定义卡片 - v1.7.0
+ * 新增 v1.7.0:
+ *   - 阶梯用水量进度条可视化
+ *   - 预估本月账单显示
+ *   - 距截止日期天数显示
+ *   - 当前阶梯指示
  * 用法示例:
  *   type: custom:wenzhou-water-card
  *   entity: sensor.wenzhou_water_xxx_account_balance
@@ -8,7 +13,7 @@
 (function () {
   'use strict';
 
-  const CARD_VERSION = '1.4.0';
+  const CARD_VERSION = '1.7.0';
 
   class WenzhouWaterCard extends HTMLElement {
     setConfig(config) {
@@ -52,9 +57,46 @@
             <div class="wwc-card-unit">¥</div>
           </div>
           <div class="wwc-card wwc-card-estimate" id="${this._cardId}-estimate">
-            <div class="wwc-card-label">预估月用</div>
+            <div class="wwc-card-label">预估月账单</div>
             <div class="wwc-card-value wwc-value-estimate">--</div>
-            <div class="wwc-card-unit">m³</div>
+            <div class="wwc-card-unit">¥</div>
+          </div>
+        </div>
+        <!-- 阶梯进度条 -->
+        <div class="wwc-step-bar" id="${this._cardId}-step-bar">
+          <div class="wwc-step-label">
+            <span class="wwc-step-text">当前阶梯</span>
+            <span class="wwc-step-value" id="${this._cardId}-step-value">--</span>
+          </div>
+          <div class="wwc-step-progress">
+            <div class="wwc-step-track">
+              <div class="wwc-step-fill step1" id="${this._cardId}-fill1"></div>
+              <div class="wwc-step-fill step2" id="${this._cardId}-fill2"></div>
+              <div class="wwc-step-fill step3" id="${this._cardId}-fill3"></div>
+            </div>
+            <div class="wwc-step-marks">
+              <span class="wwc-step-mark">0</span>
+              <span class="wwc-step-mark" id="${this._cardId}-mark1">17</span>
+              <span class="wwc-step-mark" id="${this._cardId}-mark2">30</span>
+              <span class="wwc-step-mark" id="${this._cardId}-mark3">→</span>
+            </div>
+          </div>
+          <div class="wwc-step-usage">
+            <div class="wwc-step-item">
+              <span class="wwc-step-num">一阶</span>
+              <span class="wwc-step-val" id="${this._cardId}-s1">--</span>
+              <span class="wwc-step-unit">m³</span>
+            </div>
+            <div class="wwc-step-item">
+              <span class="wwc-step-num">二阶</span>
+              <span class="wwc-step-val" id="${this._cardId}-s2">--</span>
+              <span class="wwc-step-unit">m³</span>
+            </div>
+            <div class="wwc-step-item">
+              <span class="wwc-step-num">三阶</span>
+              <span class="wwc-step-val" id="${this._cardId}-s3">--</span>
+              <span class="wwc-step-unit">m³</span>
+            </div>
           </div>
         </div>
         <div class="wwc-secondary-row">
@@ -153,6 +195,97 @@
         .wwc-value-bill { color: #ffb74d; }
         .wwc-value-usage { color: #81d4fa; }
         .wwc-value-estimate { color: #a5d6a7; }
+        /* 阶梯进度条样式 */
+        .wwc-step-bar {
+          background: rgba(255,255,255,0.08);
+          border-radius: 10px;
+          padding: 10px 12px;
+          margin-bottom: 10px;
+          border: 1px solid rgba(255,255,255,0.06);
+        }
+        .wwc-step-label {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+        }
+        .wwc-step-text {
+          font-size: 11px;
+          color: rgba(255,255,255,0.7);
+        }
+        .wwc-step-value {
+          font-size: 12px;
+          font-weight: 600;
+          color: #81d4fa;
+          background: rgba(129,212,250,0.15);
+          padding: 2px 8px;
+          border-radius: 10px;
+        }
+        .wwc-step-progress {
+          position: relative;
+          margin-bottom: 6px;
+        }
+        .wwc-step-track {
+          height: 8px;
+          background: rgba(255,255,255,0.15);
+          border-radius: 4px;
+          display: flex;
+          overflow: hidden;
+        }
+        .wwc-step-fill {
+          height: 100%;
+          transition: width 0.4s ease;
+          min-width: 0;
+        }
+        .wwc-step-fill.step1 {
+          background: linear-gradient(90deg, #4fc3f7, #29b6f6);
+        }
+        .wwc-step-fill.step2 {
+          background: linear-gradient(90deg, #ffb74d, #ffa726);
+        }
+        .wwc-step-fill.step3 {
+          background: linear-gradient(90deg, #ff8a80, #f44336);
+        }
+        .wwc-step-marks {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 3px;
+        }
+        .wwc-step-mark {
+          font-size: 9px;
+          color: rgba(255,255,255,0.5);
+        }
+        .wwc-step-usage {
+          display: flex;
+          justify-content: space-around;
+          margin-top: 6px;
+          padding-top: 6px;
+          border-top: 1px solid rgba(255,255,255,0.08);
+        }
+        .wwc-step-item {
+          text-align: center;
+          flex: 1;
+        }
+        .wwc-step-num {
+          display: block;
+          font-size: 9px;
+          color: rgba(255,255,255,0.5);
+          margin-bottom: 2px;
+        }
+        .wwc-step-val {
+          display: block;
+          font-size: 13px;
+          font-weight: 600;
+          font-variant-numeric: tabular-nums;
+        }
+        .wwc-step-item:nth-child(1) .wwc-step-val { color: #4fc3f7; }
+        .wwc-step-item:nth-child(2) .wwc-step-val { color: #ffb74d; }
+        .wwc-step-item:nth-child(3) .wwc-step-val { color: #ff8a80; }
+        .wwc-step-unit {
+          display: block;
+          font-size: 8px;
+          color: rgba(255,255,255,0.4);
+        }
         .wwc-secondary-row {
           display: flex;
           gap: 8px;
@@ -239,15 +372,54 @@
         }
       }
 
-      // 预估月用水
+      // 预估月账单（金额）
       const estEl = document.getElementById(sid('estimate'));
       if (estEl) {
         const valEl = estEl.querySelector('.wwc-card-value');
         if (valEl) {
-          const est = state.attributes?.estimated_monthly_usage;
-          valEl.textContent = est != null ? (+est).toFixed(1) : '--';
+          const est = state.attributes?.estimated_bill_amount;
+          valEl.textContent = est != null ? (+est).toFixed(2) : '--';
         }
       }
+
+      // 阶梯进度条
+      const waterUsed = state.attributes?.water_used ?? 0;
+      const threshold1 = state.attributes?.price_threshold1 ?? 17;
+      const threshold2 = state.attributes?.price_threshold2 ?? 30;
+      const currentStep = state.attributes?.current_step ?? 1;
+      const step1Usage = state.attributes?.step1_usage ?? 0;
+      const step2Usage = state.attributes?.step2_usage ?? 0;
+      const step3Usage = state.attributes?.step3_usage ?? 0;
+
+      // 阶梯进度条百分比
+      const maxUsage = threshold2 * 1.5; // 最大显示到二阶的1.5倍
+      const fill1 = document.getElementById(sid('fill1'));
+      const fill2 = document.getElementById(sid('fill2'));
+      const fill3 = document.getElementById(sid('fill3'));
+      if (fill1) fill1.style.width = `${Math.min((step1Usage / maxUsage) * 100, 100)}%`;
+      if (fill2) fill2.style.width = `${Math.min((step2Usage / maxUsage) * 100, 100 - (step1Usage / maxUsage) * 100)}%`;
+      if (fill3) fill3.style.width = `${Math.min((step3Usage / maxUsage) * 100, 100 - ((step1Usage + step2Usage) / maxUsage) * 100)}%`;
+
+      // 阶梯阈值标记
+      const mark1 = document.getElementById(sid('mark1'));
+      const mark2 = document.getElementById(sid('mark2'));
+      if (mark1) mark1.textContent = threshold1;
+      if (mark2) mark2.textContent = threshold2;
+
+      // 当前阶梯值
+      const stepValEl = document.getElementById(sid('step-value'));
+      if (stepValEl) {
+        const stepNames = ['', '一阶', '二阶', '三阶'];
+        stepValEl.textContent = stepNames[currentStep] || '一阶';
+      }
+
+      // 阶梯用水量
+      const s1El = document.getElementById(sid('s1'));
+      const s2El = document.getElementById(sid('s2'));
+      const s3El = document.getElementById(sid('s3'));
+      if (s1El) s1El.textContent = typeof step1Usage === 'number' ? step1Usage.toFixed(1) : '--';
+      if (s2El) s2El.textContent = typeof step2Usage === 'number' ? step2Usage.toFixed(1) : '--';
+      if (s3El) s3El.textContent = typeof step3Usage === 'number' ? step3Usage.toFixed(1) : '--';
 
       // 账户预警
       const warnEl = document.getElementById(sid('warning'));
@@ -285,23 +457,42 @@
         }
       }
 
-      // 截止日期
+      // 距截止日期天数
       const dueEl = document.getElementById(sid('due'));
       if (dueEl) {
-        const due = state.attributes?.due_date;
+        const daysUntilDue = state.attributes?.days_until_due;
         const textEl = dueEl.querySelector('.wwc-info-text');
-        if (textEl && due) textEl.textContent = due === '未知' ? '--' : due;
+        const icoEl = dueEl.querySelector('.wwc-info-icon');
+        if (textEl) {
+          if (daysUntilDue != null) {
+            if (daysUntilDue < 0) {
+              textEl.textContent = `逾期${-daysUntilDue}天`;
+            } else if (daysUntilDue === 0) {
+              textEl.textContent = '今天截止';
+            } else {
+              textEl.textContent = `剩${daysUntilDue}天`;
+            }
+          } else {
+            textEl.textContent = '--';
+          }
+        }
+        if (icoEl) {
+          if (daysUntilDue < 0) {
+            icoEl.textContent = '🚨';
+          } else if (daysUntilDue <= 3) {
+            icoEl.textContent = '⚠️';
+          } else {
+            icoEl.textContent = '📅';
+          }
+        }
       }
 
       // 更新时间
       const timeEl = document.getElementById(sid('time'));
       if (timeEl) {
-        const lastChanged = state.last_changed;
-        if (lastChanged) {
-          const d = new Date(lastChanged);
-          const hh = String(d.getHours()).padStart(2, '0');
-          const mm = String(d.getMinutes()).padStart(2, '0');
-          timeEl.textContent = `${hh}:${mm}`;
+        const lastUpdate = state.attributes?.last_update_time;
+        if (lastUpdate) {
+          timeEl.textContent = lastUpdate.split(' ')[1]?.substring(0, 5) || '--';
         }
       }
     }
@@ -313,7 +504,7 @@
     }
 
     getCardSize() {
-      return 3;
+      return 4;
     }
   }
 

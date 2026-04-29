@@ -1,9 +1,17 @@
-"""温州水务传感器 - v1.4.0
-新增 v1.4.0:
-  - 新增传感器: 预估月用水量、账户预警、历史月均用水、与均值对比
-  - 新增历史数据持久化 (HA Storage)
-  - account_warning 动态图标 (正常/偏低/不足/为0四级)
+"""温州水务传感器 - v1.7.0
+新增 v1.7.0:
+  - 新增阶梯水价解析（threshold1/2 一二阶阈值）
+  - 新增阶梯用水量计算（step1_usage/step2_usage/step3_usage）
+  - 新增当前所处阶梯传感器（current_step）
+  - 新增预估本月账单金额（estimated_bill_amount）
+  - 新增距截止日期天数（days_until_due）
+  - 新增诊断传感器：最后更新时间（last_update_time）
+新增 v1.6.0:
+  - 并发优化：批量抓取历史数据时并行请求，信号量控制+防限流延迟
+  - 一次性初始化：添加标志位避免每次刷新重复触发批量初始化
+  - 历史数据扩展：新增 read_date（抄表日期）、balance（余额）字段
 """
+import asyncio
 import logging
 from datetime import timedelta, datetime
 from typing import Any, Dict, Optional
@@ -87,23 +95,7 @@ SENSOR_TYPES = {
         "icon": "mdi:calendar-clock",
         "unit": None,
     },
-    # 水表信息
-    "meter_address": {
-        "name": "用水地址",
-        "icon": "mdi:home-map-marker",
-        "unit": None,
-    },
-    "meter_station": {
-        "name": "所属营业厅",
-        "icon": "mdi:office-building",
-        "unit": None,
-    },
-    "price_type": {
-        "name": "水价类型",
-        "icon": "mdi:currency-cny",
-        "unit": None,
-    },
-    # 单价（元/立方米）
+    # 阶梯信息
     "water_price_step1": {
         "name": "一阶水价",
         "icon": "mdi:currency-cny",
@@ -124,16 +116,72 @@ SENSOR_TYPES = {
         "icon": "mdi:recycle",
         "unit": "¥/m³",
     },
+    "price_threshold1": {
+        "name": "一阶阈值",
+        "icon": "mdi:stairs-up",
+        "unit": "m³",
+    },
+    "price_threshold2": {
+        "name": "二阶阈值",
+        "icon": "mdi:stairs-up",
+        "unit": "m³",
+    },
+    "step1_usage": {
+        "name": "一阶用水量",
+        "icon": "mdi:numeric-1-box",
+        "unit": "m³",
+    },
+    "step2_usage": {
+        "name": "二阶用水量",
+        "icon": "mdi:numeric-2-box",
+        "unit": "m³",
+    },
+    "step3_usage": {
+        "name": "三阶用水量",
+        "icon": "mdi:numeric-3-box",
+        "unit": "m³",
+    },
+    "current_step": {
+        "name": "当前阶梯",
+        "icon": "mdi:stairs",
+        "unit": None,
+    },
+    # 水表信息
+    "meter_address": {
+        "name": "用水地址",
+        "icon": "mdi:home-map-marker",
+        "unit": None,
+    },
+    "meter_station": {
+        "name": "所属营业厅",
+        "icon": "mdi:office-building",
+        "unit": None,
+    },
+    "price_type": {
+        "name": "水价类型",
+        "icon": "mdi:currency-cny",
+        "unit": None,
+    },
     # 预估与预警
     "estimated_monthly_usage": {
         "name": "预估月用水量",
         "icon": "mdi:chart-line",
         "unit": "m³",
     },
+    "estimated_bill_amount": {
+        "name": "预估本月账单",
+        "icon": "mdi:calculator",
+        "unit": "¥",
+    },
     "account_warning": {
         "name": "账户预警",
         "icon": "mdi:alert",
         "unit": None,
+    },
+    "days_until_due": {
+        "name": "距截止天数",
+        "icon": "mdi:calendar-alert",
+        "unit": "天",
     },
     "history_avg_usage": {
         "name": "历史月均用水",
@@ -149,6 +197,11 @@ SENSOR_TYPES = {
     "integration_status": {
         "name": "集成状态",
         "icon": "mdi:heart-pulse",
+        "unit": None,
+    },
+    "last_update_time": {
+        "name": "最后更新时间",
+        "icon": "mdi:clock-outline",
         "unit": None,
     },
 }
@@ -267,6 +320,10 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, access_token: str, card_ids: list):
         self.api = WenzhouWaterAPI(access_token)
         self.card_ids = card_ids  # 支持多水表
+        # 历史初始化标志：避免每次刷新都重复触发批量初始化
+        self._history_init_flags = {card_id: False for card_id in card_ids}
+        # 初始化锁：防止并发重复初始化
+        self._history_init_locks = {card_id: asyncio.Lock() for card_id in card_ids}
         super().__init__(
             hass,
             _LOGGER,
@@ -294,14 +351,28 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             "billing_month": "未知",
             "status": "unknown",
             "integration_status": "unknown",
+            # 阶梯单价
             "water_price_step1": 0,
             "water_price_step2": 0,
             "water_price_step3": 0,
             "water_price_sewage": 0,
+            "price_threshold1": 0,
+            "price_threshold2": 0,
+            # 阶梯用水量
+            "step1_usage": 0,
+            "step2_usage": 0,
+            "step3_usage": 0,
+            "current_step": 1,
+            # 预估
             "estimated_monthly_usage": 0,
+            "estimated_bill_amount": 0,
             "account_warning": "正常",
+            "days_until_due": 0,
+            # 历史
             "history_avg_usage": 0,
             "usage_vs_avg": 0,
+            # 诊断
+            "last_update_time": "未知",
         }
 
     async def _load_billing_history(self, card_id: str) -> list:
@@ -344,6 +415,94 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             await store.async_save(trimmed)
         except Exception as e:
             _LOGGER.error(f"保存历史记录失败（{card_id}）: {e}")
+
+    async def _init_billing_history_from_api(self, card_id: str) -> list:
+        """首次初始化：从 API 批量抓取历史账单（最多24个月）
+
+        并发优化：每批6个月，最多4批并行请求，间隔500ms防限流
+        """
+        import asyncio as _asyncio
+        from .api import WenzhouWaterAPI
+
+        now = datetime.now()
+        end_month = now.strftime("%Y%m")
+        earliest = WenzhouWaterAPI.EARLIEST_BILLING_MONTH  # "202403"
+
+        _LOGGER.info(f"温州水务：开始初始化历史账单（{card_id}），范围 {earliest} - {end_month}")
+
+        # 分批规划：每批 6 个月
+        batch_size = 6
+        batches = []
+        current_start = earliest
+        while current_start <= end_month:
+            current_end = WenzhouWaterAPI._calc_month(current_start, batch_size - 1)
+            if current_end > end_month:
+                current_end = end_month
+            batches.append((current_start, current_end))
+            current_start = WenzhouWaterAPI._calc_month(current_start, batch_size)
+
+        _LOGGER.info(f"  规划 {len(batches)} 批次: {batches}")
+
+        # 并发控制：最多同时 2 个请求，间隔 500ms 防限流
+        semaphore = _asyncio.Semaphore(2)
+        history = []
+        fetch_errors = 0
+
+        async def _fetch_batch(start: str, end: str) -> list:
+            """抓取单个批次（受信号量控制）"""
+            nonlocal fetch_errors
+            async with semaphore:
+                try:
+                    _LOGGER.info(f"  抓取 {start} - {end}...")
+                    bills = await self.api.get_bills(card_id, start, end)
+                    await _asyncio.sleep(0.5)  # 防限流延迟
+                    return bills
+                except Exception as e:
+                    _LOGGER.warning(f"  抓取 {start}-{end} 失败: {e}")
+                    fetch_errors += 1
+                    return []
+
+        # 并行执行所有批次
+        results = await _asyncio.gather(*[_fetch_batch(s, e) for s, e in batches])
+        for bills in results:
+            for bill in bills:
+                bm = bill.get("billingMonth", "")
+                if not bm:
+                    continue
+                history.append({
+                    "billing_month": bm,
+                    "water_used": float(bill.get("readWater", 0) or 0),
+                    "bill_amount": float(bill.get("amount", 0) or 0),
+                    "read_date": bill.get("readDate", ""),  # 扩展：保存抄表日期
+                    "balance": float(bill.get("balance", 0) or 0),  # 扩展：保存余额
+                })
+
+        # 去重（按 billing_month）+ 排序
+        seen = set()
+        unique = []
+        for h in history:
+            bm = h.get("billing_month", "")
+            if bm and bm not in seen:
+                seen.add(bm)
+                unique.append(h)
+        unique.sort(key=lambda x: x.get("billing_month", ""), reverse=True)
+
+        # 只保留最近12个月
+        result = unique[:12]
+        _LOGGER.info(f"  历史账单初始化完成，共 {len(result)} 条（失败 {fetch_errors} 批次）")
+
+        # 保存到 Storage
+        if result:
+            try:
+                store = self.hass.helpers.store.Store(
+                    key=f"{DOMAIN}_history_{card_id}",
+                    atomic_update=True,
+                )
+                await store.async_save(result)
+            except Exception as e:
+                _LOGGER.error(f"  保存历史账单失败: {e}")
+
+        return result
 
     async def _async_update_data(self) -> dict:
         """更新数据 - 每个水表独立获取，全局共享账户信息"""
@@ -416,6 +575,9 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     water_price_step2 = 0.0
                     water_price_step3 = 0.0
                     water_price_sewage = 0.0
+                    price_threshold1 = 0.0
+                    price_threshold2 = 0.0
+
                     for detail in details:
                         pi_name = detail.get("piName", "")
                         level = detail.get("level", -1)
@@ -423,17 +585,57 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                         # 基本水价，取 level=1/2/3（一阶/二阶/三阶）
                         if pi_name == "基本水价" and level == 1:
                             water_price_step1 = price
+                            # 一阶阈值可能在 pi_range 或 startRange/endRange 中
+                            price_threshold1 = float(detail.get("piRange", detail.get("startRange", 0)) or 0)
                         elif pi_name == "基本水价" and level == 2:
                             water_price_step2 = price
+                            # 二阶阈值
+                            price_threshold2 = float(detail.get("piRange", detail.get("startRange", 0)) or 0)
                         elif pi_name == "基本水价" and level == 3:
                             water_price_step3 = price
                         # 污水处理费，level=0
                         elif pi_name == "代收污水处理费" and level == 0:
                             water_price_sewage = price
+
                     card_result["water_price_step1"] = water_price_step1
                     card_result["water_price_step2"] = water_price_step2
                     card_result["water_price_step3"] = water_price_step3
                     card_result["water_price_sewage"] = water_price_sewage
+                    card_result["price_threshold1"] = price_threshold1
+                    card_result["price_threshold2"] = price_threshold2
+
+                    # 计算阶梯用水量
+                    water_used = card_result.get("water_used", 0)
+                    step1_usage = 0.0
+                    step2_usage = 0.0
+                    step3_usage = 0.0
+                    current_step = 1
+
+                    if water_used > 0:
+                        # 默认阈值（如果没有从 API 获取到）
+                        threshold1 = price_threshold1 if price_threshold1 > 0 else 17  # 一阶默认 0-17m³
+                        threshold2 = price_threshold2 if price_threshold2 > 0 else 30  # 二阶默认 17-30m³
+
+                        if water_used <= threshold1:
+                            # 纯一阶
+                            step1_usage = water_used
+                            current_step = 1
+                        elif water_used <= threshold2:
+                            # 一阶 + 二阶
+                            step1_usage = threshold1
+                            step2_usage = round(water_used - threshold1, 2)
+                            current_step = 2
+                        else:
+                            # 一阶 + 二阶 + 三阶
+                            step1_usage = threshold1
+                            step2_usage = round(threshold2 - threshold1, 2)
+                            step3_usage = round(water_used - threshold2, 2)
+                            current_step = 3
+
+                    card_result["step1_usage"] = step1_usage
+                    card_result["step2_usage"] = step2_usage
+                    card_result["step3_usage"] = step3_usage
+                    card_result["current_step"] = current_step
             except WenzhouWaterTokenExpiredError as e:
                 _LOGGER.error(f"Token已过期（{card_id}）: {e}")
                 token_expired = True
@@ -495,6 +697,56 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             else:
                 card_result["estimated_monthly_usage"] = current_usage
 
+            # 计算预估本月账单（根据预估用水量估算）
+            estimated_usage = card_result.get("estimated_monthly_usage", 0)
+            price_step1 = card_result.get("water_price_step1", 0)
+            price_step2 = card_result.get("water_price_step2", 0)
+            price_step3 = card_result.get("water_price_step3", 0)
+            price_sewage = card_result.get("water_price_sewage", 0)
+            threshold1 = card_result.get("price_threshold1", 17)
+            threshold2 = card_result.get("price_threshold2", 30)
+
+            if estimated_usage > 0:
+                # 计算阶梯用量
+                if estimated_usage <= threshold1:
+                    s1 = estimated_usage
+                    s2 = 0
+                    s3 = 0
+                elif estimated_usage <= threshold2:
+                    s1 = threshold1
+                    s2 = round(estimated_usage - threshold1, 2)
+                    s3 = 0
+                else:
+                    s1 = threshold1
+                    s2 = round(threshold2 - threshold1, 2)
+                    s3 = round(estimated_usage - threshold2, 2)
+                # 预估账单 = 水费 + 污水处理费
+                estimated_water = s1 * price_step1 + s2 * price_step2 + s3 * price_step3
+                estimated_sewage = estimated_usage * price_sewage
+                card_result["estimated_bill_amount"] = round(estimated_water + estimated_sewage, 2)
+            else:
+                card_result["estimated_bill_amount"] = 0
+
+            # 计算距截止日期天数
+            due_date_str = card_result.get("due_date", "")
+            if due_date_str and due_date_str != "未知":
+                try:
+                    # 尝试解析日期格式
+                    due_date = None
+                    for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"]:
+                        try:
+                            due_date = dt.strptime(due_date_str[:10], fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if due_date:
+                        days_left = (due_date.date() - today.date()).days
+                        card_result["days_until_due"] = days_left
+                except Exception:
+                    card_result["days_until_due"] = 0
+            else:
+                card_result["days_until_due"] = 0
+
             # 账户预警
             balance = card_result.get("account_balance", 0)
             bill_amount = card_result.get("bill_amount", 0)
@@ -509,6 +761,19 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
 
             # 历史均值（通过 billing_history 计算）
             history = await self._load_billing_history(card_id)
+
+            # 首次初始化：历史数据少于2条时，使用锁机制批量从API抓取
+            # 使用标志位确保只触发一次，避免每次刷新都检查
+            if not self._history_init_flags.get(card_id, False) and len(history) < 2:
+                self._history_init_flags[card_id] = True  # 先标记，避免并发
+                _LOGGER.info(f"历史数据不足（{len(history)}条），开始批量初始化...")
+                init_history = await self._init_billing_history_from_api(card_id)
+                if init_history:
+                    history = init_history
+                else:
+                    # 初始化失败，重置标志以便下次重试
+                    self._history_init_flags[card_id] = False
+
             if history:
                 total = sum(h.get("water_used", 0) for h in history)
                 avg = round(total / len(history), 2) if history else 0
@@ -519,13 +784,18 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     card_result["usage_vs_avg"] = vs_pct
                 else:
                     card_result["usage_vs_avg"] = 0
-                # 更新历史记录
+                # 更新历史记录（追加当前月份）
                 await self._save_billing_history(card_id, card_result, history)
             else:
                 # 无历史，初始化
                 await self._save_billing_history(card_id, card_result, [])
                 card_result["history_avg_usage"] = current_usage
                 card_result["usage_vs_avg"] = 0
+
+        # 设置最后更新时间（所有水表统一）
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for card_id in self.card_ids:
+            result[card_id]["last_update_time"] = now_str
 
         _LOGGER.info(
             f"温州水务数据更新完成（{len(self.card_ids)}个水表）: "
@@ -574,9 +844,12 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
         card_data = self.coordinator.data.get(self.card_id, {})
         value = card_data.get(self.sensor_id)
 
-        # 对百分比类传感器做格式化
+        # current_step 显示为"第X阶梯"
+        if self.sensor_id == "current_step" and isinstance(value, int):
+            return f"第{value}阶梯"
+
+        # usage_vs_avg 显示为带正负号的百分比
         if self.sensor_id == "usage_vs_avg" and isinstance(value, (int, float)):
-            # 显示为带正负号的百分比
             if value > 0:
                 return f"+{value:.1f}%"
             elif value < 0:
@@ -587,6 +860,15 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
         # account_warning 返回字符串状态
         if self.sensor_id == "account_warning":
             return str(value) if value else "正常"
+
+        # days_until_due 负数显示为逾期
+        if self.sensor_id == "days_until_due" and isinstance(value, int):
+            if value < 0:
+                return f"已逾期{-value}天"
+            elif value == 0:
+                return "今天截止"
+            else:
+                return value
 
         return value
 
@@ -609,6 +891,26 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
                 return "mdi:alert"
             else:
                 return "mdi:check-circle"
+        # current_step 根据阶梯级别显示不同图标
+        if self.sensor_id == "current_step":
+            card_data = self.coordinator.data.get(self.card_id, {}) if self.coordinator.data else {}
+            step = card_data.get("current_step", 1)
+            if step == 1:
+                return "mdi:numeric-1-box-outline"
+            elif step == 2:
+                return "mdi:numeric-2-box-outline"
+            else:
+                return "mdi:numeric-3-box-outline"
+        # days_until_due 根据天数显示不同图标
+        if self.sensor_id == "days_until_due":
+            card_data = self.coordinator.data.get(self.card_id, {}) if self.coordinator.data else {}
+            days = card_data.get("days_until_due", 0)
+            if days < 0:
+                return "mdi:alert-circle"
+            elif days <= 3:
+                return "mdi:alert"
+            else:
+                return "mdi:calendar-check"
         return base_icon
 
     @property
@@ -616,13 +918,18 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
         """额外状态属性"""
         card_data = self.coordinator.data.get(self.card_id, {}) if self.coordinator.data else {}
         raw_status = card_data.get("integration_status", "unknown")
-        return {
+        attrs = {
             "card_id": self.card_id,
             "card_name": self.card_name,
             "last_update": self.coordinator.last_update_success,
             "integration_status": raw_status,
             "integration_status_cn": INTEGRATION_STATUS.get(raw_status, raw_status),
         }
+        # Token 过期时添加操作指引
+        if raw_status == "token_expired":
+            attrs["操作指引"] = "请在集成配置中重新输入 Token 或刷新授权"
+            attrs["help_url"] = "https://github.com/C3H3-AI/ha-wenzhou-water"
+        return attrs
 
     @property
     def available(self) -> bool:

@@ -1,9 +1,22 @@
-"""温州水务Home Assistant集成 - v1.4.0
+"""温州水务Home Assistant集成 - v1.7.0
 
+新增 v1.7.0:
+  - 阶梯水价解析（threshold1/2 一二阶阈值）
+  - 阶梯用水量计算（step1_usage/step2_usage/step3_usage）
+  - 当前所处阶梯传感器（current_step）
+  - 预估本月账单金额（estimated_bill_amount）
+  - 距截止日期天数（days_until_due）
+  - 新增诊断传感器：最后更新时间（last_update_time）
+新增 v1.6.0:
+  - 并发优化：批量抓取历史数据时并行请求
+  - 一次性初始化：避免重复触发批量初始化
+  - 历史数据扩展：新增 read_date、balance 字段
+新增 v1.5.0:
+  - 历史数据首次初始化：从 API 批量抓取（2024年3月起）
 新增 v1.4.0:
   - 新增传感器：预估月用水量、账户预警、历史月均用水、与均值对比
-  - 新增历史数据持久化（HA Storage，最多保留12个月）
-  - account_warning 动态图标（正常/偏低/不足/为0四级状态）
+  - 新增历史数据持久化（HA Storage）
+  - account_warning 动态图标（正常/偏低/不足/为0四级）
 """
 import logging
 
@@ -16,7 +29,7 @@ PLATFORMS = ["sensor"]
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "1.4.0"
+__version__ = "1.7.0"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:

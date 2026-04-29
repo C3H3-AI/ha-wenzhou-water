@@ -1,5 +1,5 @@
-"""温州水务API客户端 - v1.1.0
-修复: get_bills 1月跨年bug, Token过期异常区分
+"""温州水务API客户端 - v1.2.0
+修复: get_bills 支持自定义起始月份，支持24个月历史数据抓取（2024年3月起）
 """
 import asyncio
 import logging
@@ -19,6 +19,9 @@ TOKEN_EXPIRED_CODES = {401, 10001, 10002, 10003, 10401}
 class WenzhouWaterAPI:
     """温州水务API客户端"""
 
+    # API 支持的最早账单月份
+    EARLIEST_BILLING_MONTH = "202403"  # 2024年3月
+
     def __init__(self, access_token: str):
         self.access_token = access_token
         self._headers = {
@@ -31,6 +34,28 @@ class WenzhouWaterAPI:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf254186b) XWEB/19481",
             "Referer": "https://servicewechat.com/wxe8c4cb0f78106a50/43/page-frame.html",
         }
+
+    @staticmethod
+    def _calc_month(yyyymm: str, offset: int) -> str:
+        """计算月份偏移（支持跨年）
+
+        Args:
+            yyyymm: 格式如 "202403"
+            offset: 月份偏移量，正数往后，负数往前
+
+        Returns:
+            偏移后的年月，格式如 "202402"
+        """
+        year = int(yyyymm[:4])
+        month = int(yyyymm[4:6])
+        month += offset
+        while month <= 0:
+            month += 12
+            year -= 1
+        while month > 12:
+            month -= 12
+            year += 1
+        return f"{year}{month:02d}"
 
     async def _request(self, method: str, path: str, **kwargs) -> dict:
         """发送API请求"""
@@ -88,22 +113,27 @@ class WenzhouWaterAPI:
         return await self._request("GET", f"/meter-card/{card_id}/price-info")
 
     async def get_bills(self, card_id: str, start_month: str = None, end_month: str = None) -> list:
-        """获取账单列表 - 默认最近6个月
+        """获取账单列表
 
-        修复: 1月时 now.month - 5 为负数导致 ValueError 的 bug
-        使用手动月份进位替代简单减法
+        Args:
+            card_id: 水表卡号
+            start_month: 起始月份（YYYYMM），默认从最早可抓取的时间开始（202403）
+            end_month: 结束月份（YYYYMM），默认当前月份
+
+        Returns:
+            账单列表，按月份降序排列
         """
         now = datetime.now()
         if not end_month:
             end_month = now.strftime("%Y%m")
-        if not start_month:
-            # 安全计算6个月前的月份（跨年正确）
-            year = now.year
-            month = now.month - 5
-            while month <= 0:
-                month += 12
-                year -= 1
-            start_month = f"{year}{month:02d}"
+
+        if start_month:
+            # 确保不早于最早可抓取月份
+            if start_month < self.EARLIEST_BILLING_MONTH:
+                start_month = self.EARLIEST_BILLING_MONTH
+        else:
+            # 默认从最早可抓取月份开始（2024年3月）
+            start_month = self.EARLIEST_BILLING_MONTH
 
         return await self._request("GET", f"/meter-card/{card_id}/bills?startBM={start_month}&endBM={end_month}")
 
