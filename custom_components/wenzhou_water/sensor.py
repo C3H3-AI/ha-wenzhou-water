@@ -1,4 +1,6 @@
-"""温州水务传感器 - v1.7.6
+"""温州水务传感器 - v1.7.7
+修复 v1.7.7:
+  - 命名更精确："累计一阶用水量"改为"本年累计一阶用水量"（避免误解为从用水开始的全部累计）
 修复 v1.7.6:
   - 传感器命名更清晰：step1_usage 改为"本期一阶用水量"，level_usage 改为"累计一阶用水量"
 修复 v1.7.5:
@@ -189,7 +191,7 @@ SENSOR_TYPES = {
     },
     # 阶梯详情（从 price-info 接口获取）
     "level_usage": {
-        "name": "累计一阶用水量",
+        "name": "本年累计一阶用水量",
         "icon": "mdi:numeric-1-box-outline",
         "unit": "m³",
         "device_class": "water",

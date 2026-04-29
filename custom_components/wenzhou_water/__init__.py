@@ -1,6 +1,9 @@
-"""温州水务Home Assistant集成 - v1.7.5
+"""温州水务Home Assistant集成 - v1.7.7
 
-修复 v1.7.5:
+修复 v1.7.7:
+  - 传感器命名更精确："累计一阶用水量"改为"本年累计一阶用水量"
+修复 v1.7.6:
+  - 传感器命名更清晰：step1_usage 改为"本期一阶用水量"，level_usage 改为"累计一阶用水量"
   - 修复 items 未定义的 NameError bug
   - 修复 threshold1 过早引用问题（应在 items 解析后赋值）
   - 添加 state_class/device_class 属性（支持能源仪表盘）
@@ -44,7 +47,7 @@ PLATFORMS = ["sensor", "button"]
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "1.7.5"
+__version__ = "1.7.7"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
