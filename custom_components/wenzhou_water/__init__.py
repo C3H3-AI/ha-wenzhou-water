@@ -1,18 +1,33 @@
-"""温州水务Home Assistant集成 - v1.7.0
+"""温州水务Home Assistant集成 - v1.7.5
 
+修复 v1.7.5:
+  - 修复 items 未定义的 NameError bug
+  - 修复 threshold1 过早引用问题（应在 items 解析后赋值）
+  - 添加 state_class/device_class 属性（支持能源仪表盘）
+  - 添加按钮平台：刷新数据、爪取历史
+  - 初始化时自动爪取历史数据（历史<2条时自动触发）
+修复 v1.7.4:
+  - 从 price-info items[] 解析二阶/三阶阈值（priceThreshold2/3 通常为 None）
+修复 v1.7.3:
+  - 从账单 details[] 兜底提取阶梯价格（某些水表 price-info 不返回 priceStep1/2/3）
+修复 v1.7.1:
+  - 使用 price-info 接口获取真实阶梯数据，不再硬编码阈值
+  - 新增传感器: level_usage(一阶已用量), level_max(一阶上限), level_remaining(阶梯剩余量), person_count(家庭人口)
+  - 各阶梯价格从 price-info.items 获取，不再从账单推断
+  - 阶梯阈值直接使用 API 返回的 levelMax，不再计算
 新增 v1.7.0:
-  - 阶梯水价解析（threshold1/2 一二阶阈值）
-  - 阶梯用水量计算（step1_usage/step2_usage/step3_usage）
-  - 当前所处阶梯传感器（current_step）
-  - 预估本月账单金额（estimated_bill_amount）
-  - 距截止日期天数（days_until_due）
+  - 新增阶梯水价解析（threshold1/2 一二阶阈值）
+  - 新增阶梯用水量计算（step1_usage/step2_usage/step3_usage）
+  - 新增当前所处阶梯传感器（current_step）
+  - 新增预估本月账单金额（estimated_bill_amount）
+  - 新增距截止日期天数（days_until_due）
   - 新增诊断传感器：最后更新时间（last_update_time）
 新增 v1.6.0:
-  - 并发优化：批量抓取历史数据时并行请求
+  - 并发优化：批量爪取历史数据时并行请求
   - 一次性初始化：避免重复触发批量初始化
   - 历史数据扩展：新增 read_date、balance 字段
 新增 v1.5.0:
-  - 历史数据首次初始化：从 API 批量抓取（2024年3月起）
+  - 历史数据首次初始化：从 API 批量爪取（2024年3月起）
 新增 v1.4.0:
   - 新增传感器：预估月用水量、账户预警、历史月均用水、与均值对比
   - 新增历史数据持久化（HA Storage）
@@ -25,11 +40,11 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, CONF_SCAN_INTERVAL, CONF_SCAN_INTERVAL_UNIT, CONF_METER_CARDS, DEFAULT_SCAN_INTERVAL_VALUE, DEFAULT_SCAN_INTERVAL_UNIT
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "button"]
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "1.7.0"
+__version__ = "1.7.5"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:

@@ -1,4 +1,8 @@
-"""温州水务传感器 - v1.7.4
+"""温州水务传感器 - v1.7.5
+修复 v1.7.5:
+  - 修复 items 未定义的 NameError bug
+  - 修复 threshold1 过早引用问题（应在 items 解析后赋值）
+  - 添加 state_class/device_class 属性（支持能源仪表盘）
 修复 v1.7.4:
   - 从 price-info items[] 解析二阶/三阶阈值（priceThreshold2/3 通常为 None）
 修复 v1.7.3:
@@ -62,32 +66,42 @@ SENSOR_TYPES = {
         "name": "账户余额",
         "icon": "mdi:cash",
         "unit": "¥",
+        "device_class": "monetary",
+        "state_class": "measurement",
     },
     "total_arrears": {
         "name": "总欠费",
         "icon": "mdi:alert-circle",
         "unit": "¥",
+        "device_class": "monetary",
+        "state_class": "measurement",
     },
     # 最新账单
     "last_reading": {
         "name": "上期读数",
         "icon": "mdi:counter",
         "unit": "m³",
+        "state_class": "measurement",
     },
     "current_reading": {
         "name": "本期读数",
         "icon": "mdi:counter",
         "unit": "m³",
+        "state_class": "measurement",
     },
     "water_used": {
         "name": "本期用水量",
         "icon": "mdi:water",
         "unit": "m³",
+        "device_class": "water",
+        "state_class": "measurement",
     },
     "bill_amount": {
         "name": "账单金额",
         "icon": "mdi:receipt",
         "unit": "¥",
+        "device_class": "monetary",
+        "state_class": "measurement",
     },
     "last_read_date": {
         "name": "上期抄表日期",
@@ -109,46 +123,62 @@ SENSOR_TYPES = {
         "name": "一阶水价",
         "icon": "mdi:currency-cny",
         "unit": "¥/m³",
+        "device_class": "monetary",
+        "state_class": "measurement",
     },
     "water_price_step2": {
         "name": "二阶水价",
         "icon": "mdi:currency-cny",
         "unit": "¥/m³",
+        "device_class": "monetary",
+        "state_class": "measurement",
     },
     "water_price_step3": {
         "name": "三阶水价",
         "icon": "mdi:currency-cny",
         "unit": "¥/m³",
+        "device_class": "monetary",
+        "state_class": "measurement",
     },
     "water_price_sewage": {
         "name": "污水处理费",
         "icon": "mdi:recycle",
         "unit": "¥/m³",
+        "device_class": "monetary",
+        "state_class": "measurement",
     },
     "price_threshold1": {
         "name": "一阶阈值",
         "icon": "mdi:stairs-up",
         "unit": "m³",
+        "state_class": "measurement",
     },
     "price_threshold2": {
         "name": "二阶阈值",
         "icon": "mdi:stairs-up",
         "unit": "m³",
+        "state_class": "measurement",
     },
     "step1_usage": {
         "name": "一阶用水量",
         "icon": "mdi:numeric-1-box",
         "unit": "m³",
+        "device_class": "water",
+        "state_class": "measurement",
     },
     "step2_usage": {
         "name": "二阶用水量",
         "icon": "mdi:numeric-2-box",
         "unit": "m³",
+        "device_class": "water",
+        "state_class": "measurement",
     },
     "step3_usage": {
         "name": "三阶用水量",
         "icon": "mdi:numeric-3-box",
         "unit": "m³",
+        "device_class": "water",
+        "state_class": "measurement",
     },
     "current_step": {
         "name": "当前阶梯",
@@ -160,21 +190,27 @@ SENSOR_TYPES = {
         "name": "一阶已用量",
         "icon": "mdi:numeric-1-box-outline",
         "unit": "m³",
+        "device_class": "water",
+        "state_class": "measurement",
     },
     "level_max": {
         "name": "一阶上限",
         "icon": "mdi:stairs-up",
         "unit": "m³",
+        "state_class": "measurement",
     },
     "level_remaining": {
         "name": "阶梯剩余量",
         "icon": "mdi:water-outline",
         "unit": "m³",
+        "device_class": "water",
+        "state_class": "measurement",
     },
     "person_count": {
         "name": "家庭人口",
         "icon": "mdi:account-group",
         "unit": "人",
+        "state_class": "measurement",
     },
     # 水表信息
     "meter_address": {
@@ -197,11 +233,15 @@ SENSOR_TYPES = {
         "name": "预估月用水量",
         "icon": "mdi:chart-line",
         "unit": "m³",
+        "device_class": "water",
+        "state_class": "measurement",
     },
     "estimated_bill_amount": {
         "name": "预估本月账单",
         "icon": "mdi:calculator",
         "unit": "¥",
+        "device_class": "monetary",
+        "state_class": "measurement",
     },
     "account_warning": {
         "name": "账户预警",
@@ -217,11 +257,14 @@ SENSOR_TYPES = {
         "name": "历史月均用水",
         "icon": "mdi:history",
         "unit": "m³",
+        "device_class": "water",
+        "state_class": "measurement",
     },
     "usage_vs_avg": {
         "name": "与均值对比",
         "icon": "mdi:percent",
         "unit": "%",
+        "state_class": "measurement",
     },
     # 状态
     "integration_status": {
@@ -624,15 +667,15 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                     card_result["level_remaining"] = max(0, level_max - level_usage)
                     card_result["person_count"] = person_count
                     card_result["price_type"] = price_type
-                    card_result["price_threshold1"] = threshold1  # 一阶上限（从 items[level=1].endWater 解析）
 
-                    # 从 price-info 顶层字段读取阶梯价格
-                    # API 返回 priceStep1/priceStep2/priceStep3 在顶层，不在 items 中
+                    # 从 price-info 顶层字段读取阶梯价格（顶层的 priceStep1/2/3 通常为 0 或不存在）
                     water_price_step1 = float(price_info.get("priceStep1", 0) or 0)
                     water_price_step2 = float(price_info.get("priceStep2", 0) or 0)
                     water_price_step3 = float(price_info.get("priceStep3", 0) or 0)
 
-                    # 从 items 中解析阶梯阈值和污水处理费（顶层的 priceThreshold2/3 通常为 None）
+                    # 从 items 中解析阶梯阈值和污水处理费
+                    # items[] 中 price=0 是 API 格式问题，真实价格从 bills details 兜底
+                    items = price_info.get("items", []) or []
                     threshold1 = float(price_info.get("levelMax", 0) or 0)  # 兜底
                     threshold2 = 0.0
                     threshold3 = 0.0
@@ -650,6 +693,8 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                         elif pi_name == "代收污水处理费" and level == 0:
                             water_price_sewage = float(item.get("price", 0) or 0)
 
+                    # 一阶阈值必须在 items 解析完成后才能赋值
+                    card_result["price_threshold1"] = threshold1
                     card_result["water_price_step1"] = water_price_step1
                     card_result["water_price_step2"] = water_price_step2
                     card_result["water_price_step3"] = water_price_step3
@@ -930,6 +975,11 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
         self.card_id = card_id
         self.card_name = card_name
         self._attr_has_entity_name = True
+
+        # 从 SENSOR_TYPES 读取 state_class / device_class（支持能源仪表盘）
+        sensor_cfg = SENSOR_TYPES.get(sensor_id, {})
+        self._attr_device_class = sensor_cfg.get("device_class")
+        self._attr_state_class = sensor_cfg.get("state_class")
 
     @property
     def unique_id(self) -> str:
