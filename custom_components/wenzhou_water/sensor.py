@@ -1,4 +1,6 @@
-"""温州水务传感器 - v1.7.9
+"""温州水务传感器 - v1.9.0
+新增 v1.9.0:
+  - Token过期后自动发送通知提醒用户重新登录
 修复 v1.7.9:
   - 新增传感器：下次轮询时间（显示下次月度调度刷新时间）
 修复 v1.7.8:
@@ -362,7 +364,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     day_of_month = max(1, min(31, int(day_of_month)))
 
     # 创建 coordinator（支持多水表）
-    coordinator = WenzhouWaterDataUpdateCoordinator(hass, access_token, card_ids, day_of_month)
+    coordinator = WenzhouWaterDataUpdateCoordinator(hass, entry.entry_id, access_token, card_ids, day_of_month)
 
     # 首次刷新
     await coordinator.async_config_entry_first_refresh()
@@ -403,14 +405,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
     """温州水务数据更新协调器（支持多水表）"""
 
-    def __init__(self, hass: HomeAssistant, access_token: str, card_ids: list, day_of_month: int = 1):
+    def __init__(self, hass: HomeAssistant, entry_id: str, access_token: str, card_ids: list, day_of_month: int = 1):
         self.api = WenzhouWaterAPI(access_token)
+        self._entry_id = entry_id  # 保存 entry_id 用于通知
         self.card_ids = card_ids  # 支持多水表
         self.day_of_month = day_of_month  # 保存月度调度日期
         # 历史初始化标志：避免每次刷新都重复触发批量初始化
         self._history_init_flags = {card_id: False for card_id in card_ids}
         # 初始化锁：防止并发重复初始化
         self._history_init_locks = {card_id: asyncio.Lock() for card_id in card_ids}
+        # Token过期通知标志：避免重复发送通知
+        self._token_expired_notified = False
         # Store 实例缓存（避免 HA 2026.4 中 hass.helpers.store 访问方式变化的问题）
         # 在 __init__ 中创建，保存到 hass.data 复用
         self._history_stores: Dict[str, Any] = {}
@@ -839,6 +844,14 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             for card_id in self.card_ids:
                 result[card_id]["integration_status"] = "token_expired"
                 result[card_id]["status"] = "error"
+            # 发送 Token 过期通知（只发送一次）
+            if not self._token_expired_notified:
+                self._token_expired_notified = True
+                try:
+                    from . import async_token_expired_notification
+                    await async_token_expired_notification(self.hass, self._entry_id)
+                except Exception as e:
+                    _LOGGER.error(f"发送Token过期通知失败: {e}")
 
         # 计算新增传感器：预估月用水量、账户预警、历史均值
         from datetime import datetime as dt

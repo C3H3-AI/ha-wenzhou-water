@@ -1,4 +1,7 @@
-"""温州水务API客户端 - v1.2.0
+"""温州水务API客户端 - v1.3.0
+新增 v1.3.0:
+  - 新增短信验证码登录: send_sms_code(), login_with_sms()
+  - 无需预先获取 Token，直接用手机号+验证码登录
 修复: get_bills 支持自定义起始月份，支持24个月历史数据抓取（2024年3月起）
 """
 import asyncio
@@ -17,7 +20,7 @@ TOKEN_EXPIRED_CODES = {401, 10001, 10002, 10003, 10401}
 
 
 class WenzhouWaterAPI:
-    """温州水务API客户端"""
+    """温州水务API客户端（需Token初始化）"""
 
     # API 支持的最早账单月份
     EARLIEST_BILLING_MONTH = "202403"  # 2024年3月
@@ -157,3 +160,107 @@ class WenzhouWaterTokenExpiredError(WenzhouWaterAPIError):
 
     def __init__(self, message: str = "Token已过期", code: int = 401):
         super().__init__(message, code)
+
+
+# ============ 短信验证码登录（无需Token）============
+
+# 发送短信验证码的请求头（与有Token的请求头不同）
+_SMS_HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/plain, */*",
+    "Origin": "https://sw-os.wzgytz.com",
+    "Referer": "https://sw-os.wzgytz.com/login",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+}
+
+
+class WenzhouWaterSMSLogin:
+    """温州水务短信验证码登录（无需Token）"""
+
+    @staticmethod
+    async def send_sms_code(mobile: str) -> str:
+        """发送短信验证码
+
+        Args:
+            mobile: 手机号
+
+        Returns:
+            验证码ID（后续登录时需要）
+
+        Raises:
+            WenzhouWaterAPIError: 发送失败时抛出
+        """
+        url = f"{BASE_URL}/system/sms/code"
+        payload = {
+            "channelAccountId": 2,
+            "mobile": mobile,
+            "template": "",
+            "subCompanyCode": "00"
+        }
+
+        timeout = aiohttp.ClientTimeout(total=API_TIMEOUT)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload, headers=_SMS_HEADERS) as response:
+                    data = await response.json()
+                    code = data.get("code", 0)
+                    if code != 0:
+                        msg = data.get("message", "发送验证码失败")
+                        _LOGGER.error(f"发送短信验证码失败: {msg} (code={code})")
+                        raise WenzhouWaterAPIError(msg, code)
+                    # 返回验证码ID
+                    return data.get("data", "")
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"发送短信验证码网络错误: {e}")
+            raise WenzhouWaterAPIError(f"网络错误: {e}", -1) from e
+        except asyncio.TimeoutError as e:
+            _LOGGER.error(f"发送短信验证码超时: {e}")
+            raise WenzhouWaterAPIError("请求超时", -2) from e
+
+    @staticmethod
+    async def login_with_sms(mobile: str, code: str, verify_id: str) -> dict:
+        """短信验证码登录
+
+        Args:
+            mobile: 手机号
+            code: 收到的6位短信验证码
+            verify_id: 发送验证码时返回的验证码ID
+
+        Returns:
+            登录结果，包含:
+            - authToken: 访问令牌
+            - expired: 过期时间
+            - registerCode: 注册码（可能为null）
+
+        Raises:
+            WenzhouWaterAPIError: 登录失败时抛出
+            WenzhouWaterTokenExpiredError: Token无效（理论上不会在这里抛出）
+        """
+        url = f"{BASE_URL}/system/auth/sign-in"
+        # mobileVerify 格式: "验证码ID#验证码"
+        payload = {
+            "authType": "mobile",
+            "channelAccountId": 2,
+            "code": "",  # 空字符串
+            "mobile": mobile,
+            "mobileCode": code,  # 6位验证码
+            "mobileVerify": f"{verify_id}#{code}"
+        }
+
+        timeout = aiohttp.ClientTimeout(total=API_TIMEOUT)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload, headers=_SMS_HEADERS) as response:
+                    data = await response.json()
+                    code = data.get("code", 0)
+                    if code != 0:
+                        msg = data.get("message", "登录失败")
+                        _LOGGER.error(f"短信验证码登录失败: {msg} (code={code})")
+                        raise WenzhouWaterAPIError(msg, code)
+                    return data.get("data", {})
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"短信验证码登录网络错误: {e}")
+            raise WenzhouWaterAPIError(f"网络错误: {e}", -1) from e
+        except asyncio.TimeoutError as e:
+            _LOGGER.error(f"短信验证码登录超时: {e}")
+            raise WenzhouWaterAPIError("请求超时", -2) from e

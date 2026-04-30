@@ -1,6 +1,9 @@
-"""温州水务Home Assistant集成 - v1.8.0
+"""温州水务Home Assistant集成 - v1.9.0
 
-新增 v1.8.0:
+新增 v1.9.0:
+  - 新增短信验证码登录（手机号+验证码）
+  - Token过期后自动发送通知提醒用户重新登录
+v1.8.0:
   - 配置界面添加描述文案，提升用户引导体验
 修复 v1.7.9:
   - 新增传感器：下次轮询时间（显示下次月度调度刷新时间）
@@ -43,9 +46,11 @@
   - account_warning 动态图标（正常/偏低/不足/为0四级）
 """
 import logging
+from datetime import datetime
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN, CONF_SCAN_INTERVAL, CONF_SCAN_INTERVAL_UNIT, CONF_METER_CARDS, DEFAULT_SCAN_INTERVAL_VALUE, DEFAULT_SCAN_INTERVAL_UNIT
 
@@ -53,7 +58,7 @@ PLATFORMS = ["sensor", "button"]
 
 _LOGGER = logging.getLogger(__name__)
 
-__version__ = "1.8.0"
+__version__ = "1.9.0"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -114,3 +119,31 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         _LOGGER.info("温州水务: v2→v3 迁移完成")
 
     return True
+
+
+async def async_token_expired_notification(hass: HomeAssistant, entry_id: str) -> None:
+    """Token过期通知 - 提醒用户重新登录
+
+    Args:
+        hass: Home Assistant 实例
+        entry_id: 配置项ID
+    """
+    try:
+        await hass.services.async_call(
+            "notify",
+            "notify",
+            {
+                "title": "⚠️ 温州水务 Token 已过期",
+                "message": "温州水务集成的访问令牌已过期，请重新配置集成。\n\n请进入 Home Assistant → 设置 → 设备与服务 → 温州水务 → 重新配置，使用短信验证码登录。",
+                "target": "notify",
+            },
+            blocking=True,
+        )
+        _LOGGER.warning("温州水务: Token过期通知已发送")
+    except HomeAssistantError as e:
+        _LOGGER.warning(f"温州水务: 发送Token过期通知失败: {e}")
+
+    # 同时在日志中记录，方便调试
+    _LOGGER.error(
+        f"温州水务 Token 已过期，请重新配置集成。配置项ID: {entry_id}"
+    )

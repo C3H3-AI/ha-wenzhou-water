@@ -1,5 +1,12 @@
-"""温州水务配置流程 - v1.8.0
-新增 v1.8.0:
+"""温州水务配置流程 - v2.0.0
+v2.0.0:
+  - 取消手动 Token 登录方式，仅支持短信验证码登录
+  - 简化配置流程，直接进入手机号输入步骤
+v1.9.0:
+  - 新增短信验证码登录方式（手机号+验证码）
+  - 配置界面第一步选择登录方式：手机号登录 / 手动Token
+  - Token过期后自动提示用户重新登录
+v1.8.0:
   - 配置界面添加描述文案，提升用户引导体验
   - Token 步骤：说明 Token 获取方式
   - 水表选择步骤：说明轮询时间（每月 N 日 08:00）
@@ -10,6 +17,7 @@ v1.6.0:
   - 支持多用户/多水表：可选择监控所有水表或指定水表
   - 周期抓取改为数字输入框（1-31日）而非滑动条
 """
+import re
 import logging
 from typing import Any
 
@@ -19,7 +27,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import selector
 
-from .api import WenzhouWaterAPI, WenzhouWaterTokenExpiredError
+from .api import WenzhouWaterAPI, WenzhouWaterSMSLogin, WenzhouWaterAPIError, WenzhouWaterTokenExpiredError
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_METER_CARD_ID,
@@ -35,6 +43,11 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# 短信登录常量
+CONF_MOBILE = "mobile"
+CONF_SMS_CODE = "sms_code"
+CONF_VERIFY_ID = "verify_id"
+
 
 def _validate_interval(value: int) -> str | None:
     """验证月模式数值（1-31）"""
@@ -43,45 +56,107 @@ def _validate_interval(value: int) -> str | None:
     return None
 
 
+def _validate_mobile(value: str) -> str | None:
+    """验证手机号格式"""
+    if not value:
+        return "请输入手机号"
+    # 移除空格和短横线
+    cleaned = re.sub(r"[\s\-]", "", value)
+    # 验证中国手机号格式（1开头的11位数字）
+    if not re.match(r"^1\d{10}$", cleaned):
+        return "请输入正确的手机号（11位数字）"
+    return None
+
+
+def _validate_sms_code(value: str) -> str | None:
+    """验证短信验证码格式"""
+    if not value:
+        return "请输入验证码"
+    # 6位数字
+    if not re.match(r"^\d{6}$", value.strip()):
+        return "验证码为6位数字"
+    return None
+
+
 class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
     """温州水务配置流程"""
 
-    VERSION = 3
+    VERSION = 4
 
     async def async_step_user(self, user_input: dict[str, Any] = None) -> FlowResult:
-        """用户输入配置"""
+        """第一步：输入手机号（短信验证码登录）"""
         errors = {}
 
         if user_input is not None:
-            access_token = user_input.get(CONF_ACCESS_TOKEN, "").strip()
-            if not access_token:
-                errors["base"] = "invalid_token"
+            mobile = re.sub(r"[\s\-]", "", user_input.get(CONF_MOBILE, ""))
+            validation_error = _validate_mobile(mobile)
+            if validation_error:
+                errors[CONF_MOBILE] = validation_error
             else:
                 try:
-                    api = WenzhouWaterAPI(access_token)
-                    user_info = await api.get_user_info()
-                    if not user_info:
-                        errors["base"] = "invalid_token"
-                    else:
-                        await self.async_set_unique_id(access_token[:16])
-                        self._access_token = access_token
-                        return await self.async_step_select_meter()
-                except WenzhouWaterTokenExpiredError:
-                    errors["base"] = "token_expired"
-                except Exception as e:
-                    _LOGGER.error(f"Token validation failed: {e}")
-                    errors["base"] = "invalid_token"
+                    # 发送验证码
+                    verify_id = await WenzhouWaterSMSLogin.send_sms_code(mobile)
+                    # 保存手机号和验证码ID，进入验证步骤
+                    self._mobile = mobile
+                    self._verify_id = verify_id
+                    return await self.async_step_sms_verify()
+                except WenzhouWaterAPIError as e:
+                    _LOGGER.error(f"发送验证码失败: {e}")
+                    errors["base"] = "sms_send_failed"
 
         data_schema = vol.Schema({
-            vol.Required(CONF_ACCESS_TOKEN): str,
+            vol.Required(CONF_MOBILE): str,
         })
 
         return self.async_show_form(
             step_id="user",
             data_schema=data_schema,
             errors=errors,
-            description_placeholders={"url": "https://github.com/C3H3-AI/ha-wenzhou-water"},
-            description="请输入温州水务的 Access Token。可在 [Token 获取文档]({{url}}) 查看获取方式。",
+            description="请输入注册在水务账户的手机号\n\n点击下一步后将向该手机号发送验证码短信",
+        )
+
+    async def async_step_sms_verify(self, user_input: dict[str, Any] = None) -> FlowResult:
+        """短信验证码登录 - 输入验证码"""
+        errors = {}
+
+        if user_input is not None:
+            code = user_input.get(CONF_SMS_CODE, "").strip()
+            validation_error = _validate_sms_code(code)
+            if validation_error:
+                errors[CONF_SMS_CODE] = validation_error
+            else:
+                try:
+                    # 验证验证码并登录
+                    result = await WenzhouWaterSMSLogin.login_with_sms(
+                        self._mobile, code, self._verify_id
+                    )
+                    access_token = result.get("authToken")
+                    if not access_token:
+                        errors["base"] = "login_failed"
+                    else:
+                        # 验证Token是否有效
+                        api = WenzhouWaterAPI(access_token)
+                        user_info = await api.get_user_info()
+                        if not user_info:
+                            errors["base"] = "login_failed"
+                        else:
+                            await self.async_set_unique_id(access_token[:16])
+                            self._access_token = access_token
+                            return await self.async_step_select_meter()
+                except WenzhouWaterAPIError as e:
+                    _LOGGER.error(f"SMS login failed: {e}")
+                    errors["base"] = "invalid_code"
+
+        data_schema = vol.Schema({
+            vol.Required(CONF_SMS_CODE): str,
+        })
+
+        return self.async_show_form(
+            step_id="sms_verify",
+            data_schema=data_schema,
+            errors=errors,
+            description_placeholders={"mobile": self._mobile[:3] + "****" + self._mobile[7:]},
+            description="验证码已发送至 **{{mobile}}**\n\n请输入收到的6位短信验证码",
         )
 
     async def async_step_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -159,7 +234,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
         )
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] = None) -> FlowResult:
-        """重新配置 - 支持更换 Token 和水表"""
+        """重新配置 - 使用短信验证码重新登录"""
         reconfigure_entry = self._get_reconfigure_entry()
         if reconfigure_entry is None:
             return self.async_abort(reason="cannot_reconfigure")
@@ -167,38 +242,74 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
         errors = {}
 
         if user_input is not None:
-            access_token = user_input.get(CONF_ACCESS_TOKEN, "").strip()
-
-            if access_token:
+            mobile = re.sub(r"[\s\-]", "", user_input.get(CONF_MOBILE, ""))
+            validation_error = _validate_mobile(mobile)
+            if validation_error:
+                errors[CONF_MOBILE] = validation_error
+            else:
                 try:
-                    api = WenzhouWaterAPI(access_token)
-                    user_info = await api.get_user_info()
-                    if not user_info:
-                        errors["base"] = "invalid_token"
-                    else:
-                        # 进入水表选择步骤
-                        self._access_token = access_token
-                        return await self.async_step_reconfigure_select_meter()
-                except WenzhouWaterTokenExpiredError:
-                    errors["base"] = "token_expired"
-                except Exception as e:
-                    _LOGGER.error(f"Token validation failed: {e}")
-                    errors["base"] = "invalid_token"
+                    # 发送验证码
+                    verify_id = await WenzhouWaterSMSLogin.send_sms_code(mobile)
+                    self._mobile = mobile
+                    self._verify_id = verify_id
+                    return await self.async_step_reconfigure_sms_verify()
+                except WenzhouWaterAPIError as e:
+                    _LOGGER.error(f"发送验证码失败: {e}")
+                    errors["base"] = "sms_send_failed"
 
-        current_token = reconfigure_entry.data.get(CONF_ACCESS_TOKEN, "")
-
-        reconfigure_schema = vol.Schema({
-            vol.Required(
-                CONF_ACCESS_TOKEN,
-                default=current_token,
-            ): str,
+        data_schema = vol.Schema({
+            vol.Required(CONF_MOBILE): str,
         })
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=reconfigure_schema,
+            data_schema=data_schema,
             errors=errors,
-            description="如需更换 Token，请输入新的 Access Token。留空则保持当前 Token 不变。",
+            description="请输入注册在水务账户的手机号以重新验证\n\n点击下一步后将向该手机号发送验证码短信",
+        )
+
+    async def async_step_reconfigure_sms_verify(self, user_input: dict[str, Any] = None) -> FlowResult:
+        """重新配置 - 验证短信验证码"""
+        reconfigure_entry = self._get_reconfigure_entry()
+        errors = {}
+
+        if user_input is not None:
+            code = user_input.get(CONF_SMS_CODE, "").strip()
+            validation_error = _validate_sms_code(code)
+            if validation_error:
+                errors[CONF_SMS_CODE] = validation_error
+            else:
+                try:
+                    # 验证验证码并登录
+                    result = await WenzhouWaterSMSLogin.login_with_sms(
+                        self._mobile, code, self._verify_id
+                    )
+                    access_token = result.get("authToken")
+                    if not access_token:
+                        errors["base"] = "login_failed"
+                    else:
+                        # 验证Token是否有效
+                        api = WenzhouWaterAPI(access_token)
+                        user_info = await api.get_user_info()
+                        if not user_info:
+                            errors["base"] = "login_failed"
+                        else:
+                            self._access_token = access_token
+                            return await self.async_step_reconfigure_select_meter()
+                except WenzhouWaterAPIError as e:
+                    _LOGGER.error(f"SMS login failed: {e}")
+                    errors["base"] = "invalid_code"
+
+        data_schema = vol.Schema({
+            vol.Required(CONF_SMS_CODE): str,
+        })
+
+        return self.async_show_form(
+            step_id="reconfigure_sms_verify",
+            data_schema=data_schema,
+            errors=errors,
+            description_placeholders={"mobile": self._mobile[:3] + "****" + self._mobile[7:]},
+            description="验证码已发送至 **{{mobile}}**\n\n请输入收到的6位短信验证码",
         )
 
     async def async_step_reconfigure_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
