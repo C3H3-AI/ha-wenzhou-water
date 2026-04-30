@@ -1,7 +1,7 @@
 {
   "domain": "wenzhou_water",
   "name": "温州水务",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "config_flow": true,
   "documentation": "https://github.com/C3H3-AI/ha-wenzhou-water",
   "requirements": [],
@@ -12,8 +12,8 @@
     "PLATFORMS": ["sensor", "button"]
   },
   "codewind_card": {
-    "path": "../www/community/wenzhou-water-card/wenzhou-water-card.js",
-    "title": "温州水务卡片",
-    "description": "展示水务数据、阶梯用水量、账户余额等"
+    "path": "../www/community/utility-bill-card/utility-bill-card.js",
+    "title": "公用事业账单卡片",
+    "description": "统一支持温州水务和华润燃气的仪表盘卡片"
   }
 }
