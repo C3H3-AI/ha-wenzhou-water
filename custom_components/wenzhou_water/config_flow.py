@@ -1,28 +1,16 @@
-"""温州水务配置流程 - v2.0.4
+"""温州水务配置流程 - v2.1.0
+v2.1.0:
+  - 恢复手动 Token 登录方式（SMS 登录获取的 token 无法访问数据 API）
+  - 第一步选择登录方式：短信验证码登录 / 手动输入 Token
 v2.0.4:
   - 移除 get_user_info 验证（SMS token 对该接口返回 401，导致误报 invalid_code）
 v2.0.3:
   - 修复 async_show_form 的 description 参数在 HA 2026.4.3 中不支持导致的 500 错误
-  - 新增 strings.json 翻译文件
-v2.0.2:
-  - 修复 async_migrate_entry 返回 True 而非 config_entry 导致的 500 错误（非根因）
 v2.0.0:
-  - 取消手动 Token 登录方式，仅支持短信验证码登录
-  - 简化配置流程，直接进入手机号输入步骤
+  - 取消手动 Token 登录方式，仅支持短信验证码登录（有缺陷，SMS token 无数据权限）
 v1.9.0:
   - 新增短信验证码登录方式（手机号+验证码）
   - 配置界面第一步选择登录方式：手机号登录 / 手动Token
-  - Token过期后自动提示用户重新登录
-v1.8.0:
-  - 配置界面添加描述文案，提升用户引导体验
-  - Token 步骤：说明 Token 获取方式
-  - 水表选择步骤：说明轮询时间（每月 N 日 08:00）
-  - 选项配置步骤：说明修改后的生效时机
-v1.6.0:
-  - 修复 OptionsFlow.__init__ 缺失导致 500 错误
-  - 修复 OptionsFlow self.config_entry -> self.entry 拼写错误
-  - 支持多用户/多水表：可选择监控所有水表或指定水表
-  - 周期抓取改为数字输入框（1-31日）而非滑动条
 """
 import re
 import logging
@@ -54,6 +42,10 @@ _LOGGER = logging.getLogger(__name__)
 CONF_MOBILE = "mobile"
 CONF_SMS_CODE = "sms_code"
 CONF_VERIFY_ID = "verify_id"
+CONF_LOGIN_METHOD = "login_method"
+
+LOGIN_SMS = "sms"
+LOGIN_TOKEN = "token"
 
 
 def _validate_interval(value: int) -> str | None:
@@ -67,9 +59,7 @@ def _validate_mobile(value: str) -> str | None:
     """验证手机号格式"""
     if not value:
         return "请输入手机号"
-    # 移除空格和短横线
     cleaned = re.sub(r"[\s\-]", "", value)
-    # 验证中国手机号格式（1开头的11位数字）
     if not re.match(r"^1\d{10}$", cleaned):
         return "请输入正确的手机号（11位数字）"
     return None
@@ -79,7 +69,6 @@ def _validate_sms_code(value: str) -> str | None:
     """验证短信验证码格式"""
     if not value:
         return "请输入验证码"
-    # 6位数字
     if not re.match(r"^\d{6}$", value.strip()):
         return "验证码为6位数字"
     return None
@@ -91,7 +80,67 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
     VERSION = 4
 
     async def async_step_user(self, user_input: dict[str, Any] = None) -> FlowResult:
-        """第一步：输入手机号（短信验证码登录）"""
+        """第一步：选择登录方式"""
+        if user_input is not None:
+            method = user_input.get(CONF_LOGIN_METHOD)
+            if method == LOGIN_SMS:
+                return await self.async_step_sms()
+            elif method == LOGIN_TOKEN:
+                return await self.async_step_manual_token()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema({
+                vol.Required(CONF_LOGIN_METHOD, default=LOGIN_TOKEN): selector({
+                    "select": {
+                        "options": [
+                            {"value": LOGIN_TOKEN, "label": "手动输入 Token（抓包获取）"},
+                            {"value": LOGIN_SMS, "label": "短信验证码登录"},
+                        ],
+                        "mode": "list",
+                    }
+                }),
+            }),
+        )
+
+    async def async_step_manual_token(self, user_input: dict[str, Any] = None) -> FlowResult:
+        """手动输入 Access Token"""
+        errors = {}
+
+        if user_input is not None:
+            token = user_input.get(CONF_ACCESS_TOKEN, "").strip()
+            if not token:
+                errors[CONF_ACCESS_TOKEN] = "请输入 Access Token"
+            elif len(token) < 20:
+                errors[CONF_ACCESS_TOKEN] = "Token 格式不正确，长度过短"
+            else:
+                # 验证 Token 是否有效：尝试获取水表信息
+                api = WenzhouWaterAPI(token)
+                try:
+                    meter_cards = await api.get_meter_cards()
+                    if not meter_cards:
+                        errors["base"] = "no_meters"
+                    else:
+                        await self.async_set_unique_id(token[:16])
+                        self._access_token = token
+                        return await self.async_step_select_meter()
+                except WenzhouWaterAPIError as e:
+                    _LOGGER.error(f"Token 验证失败: {e}")
+                    errors["base"] = "invalid_token"
+                except Exception as e:
+                    _LOGGER.error(f"Token 验证异常: {e}")
+                    errors["base"] = "invalid_token"
+
+        return self.async_show_form(
+            step_id="manual_token",
+            data_schema=vol.Schema({
+                vol.Required(CONF_ACCESS_TOKEN): str,
+            }),
+            errors=errors,
+        )
+
+    async def async_step_sms(self, user_input: dict[str, Any] = None) -> FlowResult:
+        """短信验证码登录 - 输入手机号"""
         errors = {}
 
         if user_input is not None:
@@ -101,9 +150,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                 errors[CONF_MOBILE] = validation_error
             else:
                 try:
-                    # 发送验证码
                     verify_id = await WenzhouWaterSMSLogin.send_sms_code(mobile)
-                    # 保存手机号和验证码ID，进入验证步骤
                     self._mobile = mobile
                     self._verify_id = verify_id
                     return await self.async_step_sms_verify()
@@ -111,13 +158,11 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                     _LOGGER.error(f"发送验证码失败: {e}")
                     errors["base"] = "sms_send_failed"
 
-        data_schema = vol.Schema({
-            vol.Required(CONF_MOBILE): str,
-        })
-
         return self.async_show_form(
-            step_id="user",
-            data_schema=data_schema,
+            step_id="sms",
+            data_schema=vol.Schema({
+                vol.Required(CONF_MOBILE): str,
+            }),
             errors=errors,
         )
 
@@ -132,7 +177,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                 errors[CONF_SMS_CODE] = validation_error
             else:
                 try:
-                    # 验证验证码并登录
                     result = await WenzhouWaterSMSLogin.login_with_sms(
                         self._mobile, code, self._verify_id
                     )
@@ -140,22 +184,29 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                     if not access_token:
                         errors["base"] = "login_failed"
                     else:
-                        # SMS 登录成功，直接保存 token 进入水表选择
-                        # 注意：get_user_info 接口对 SMS token 返回 401，故跳过此验证
-                        await self.async_set_unique_id(access_token[:16])
-                        self._access_token = access_token
-                        return await self.async_step_select_meter()
+                        # SMS 登录获取的 token 可能无法访问数据 API
+                        # 先尝试获取水表信息验证
+                        api = WenzhouWaterAPI(access_token)
+                        try:
+                            meter_cards = await api.get_meter_cards()
+                            if meter_cards:
+                                await self.async_set_unique_id(access_token[:16])
+                                self._access_token = access_token
+                                return await self.async_step_select_meter()
+                            else:
+                                errors["base"] = "no_meters"
+                        except Exception:
+                            _LOGGER.warning("SMS token 无法获取水表数据，请使用手动 Token 方式")
+                            errors["base"] = "sms_token_invalid"
                 except WenzhouWaterAPIError as e:
                     _LOGGER.error(f"SMS login failed: {e}")
                     errors["base"] = "invalid_code"
 
-        data_schema = vol.Schema({
-            vol.Required(CONF_SMS_CODE): str,
-        })
-
         return self.async_show_form(
             step_id="sms_verify",
-            data_schema=data_schema,
+            data_schema=vol.Schema({
+                vol.Required(CONF_SMS_CODE): str,
+            }),
             errors=errors,
             description_placeholders={"mobile": self._mobile[:3] + "****" + self._mobile[7:]},
         )
@@ -180,7 +231,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             return self.async_show_form(step_id="user", errors=errors)
 
         self._meter_cards = meter_cards
-        # 构建选项：第一个为"全部水表"，后续为各水表
         meter_options = {"__all__": f"全部水表（共{len(meter_cards)}个）"}
         for card in meter_cards:
             meter_options[card["cardId"]] = f"{card.get('cardName', '未知')} - {card.get('cardAddress', '未知地址')}"
@@ -193,7 +243,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             if validation_error:
                 errors[CONF_SCAN_INTERVAL] = validation_error
             elif selected:
-                # 收集选中的水表列表
                 if selected == "__all__":
                     selected_cards = [
                         {"cardId": c["cardId"], "cardName": c.get("cardName"), "cardAddress": c.get("cardAddress")}
@@ -233,12 +282,69 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
         )
 
+    # === 重新配置流程 ===
+
     async def async_step_reconfigure(self, user_input: dict[str, Any] = None) -> FlowResult:
-        """重新配置 - 使用短信验证码重新登录"""
+        """重新配置 - 同样支持两种登录方式"""
         reconfigure_entry = self._get_reconfigure_entry()
         if reconfigure_entry is None:
             return self.async_abort(reason="cannot_reconfigure")
 
+        if user_input is not None:
+            method = user_input.get(CONF_LOGIN_METHOD)
+            if method == LOGIN_TOKEN:
+                return await self.async_step_reconfigure_manual_token()
+            elif method == LOGIN_SMS:
+                return await self.async_step_reconfigure_sms()
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema({
+                vol.Required(CONF_LOGIN_METHOD, default=LOGIN_TOKEN): selector({
+                    "select": {
+                        "options": [
+                            {"value": LOGIN_TOKEN, "label": "手动输入 Token（抓包获取）"},
+                            {"value": LOGIN_SMS, "label": "短信验证码登录"},
+                        ],
+                        "mode": "list",
+                    }
+                }),
+            }),
+        )
+
+    async def async_step_reconfigure_manual_token(self, user_input: dict[str, Any] = None) -> FlowResult:
+        """重新配置 - 手动输入 Token"""
+        errors = {}
+
+        if user_input is not None:
+            token = user_input.get(CONF_ACCESS_TOKEN, "").strip()
+            if not token:
+                errors[CONF_ACCESS_TOKEN] = "请输入 Access Token"
+            elif len(token) < 20:
+                errors[CONF_ACCESS_TOKEN] = "Token 格式不正确"
+            else:
+                api = WenzhouWaterAPI(token)
+                try:
+                    meter_cards = await api.get_meter_cards()
+                    if not meter_cards:
+                        errors["base"] = "no_meters"
+                    else:
+                        self._access_token = token
+                        return await self.async_step_reconfigure_select_meter()
+                except Exception as e:
+                    _LOGGER.error(f"Token 验证失败: {e}")
+                    errors["base"] = "invalid_token"
+
+        return self.async_show_form(
+            step_id="reconfigure_manual_token",
+            data_schema=vol.Schema({
+                vol.Required(CONF_ACCESS_TOKEN): str,
+            }),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure_sms(self, user_input: dict[str, Any] = None) -> FlowResult:
+        """重新配置 - 短信验证码"""
         errors = {}
 
         if user_input is not None:
@@ -248,7 +354,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                 errors[CONF_MOBILE] = validation_error
             else:
                 try:
-                    # 发送验证码
                     verify_id = await WenzhouWaterSMSLogin.send_sms_code(mobile)
                     self._mobile = mobile
                     self._verify_id = verify_id
@@ -257,19 +362,16 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                     _LOGGER.error(f"发送验证码失败: {e}")
                     errors["base"] = "sms_send_failed"
 
-        data_schema = vol.Schema({
-            vol.Required(CONF_MOBILE): str,
-        })
-
         return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=data_schema,
+            step_id="reconfigure_sms",
+            data_schema=vol.Schema({
+                vol.Required(CONF_MOBILE): str,
+            }),
             errors=errors,
         )
 
     async def async_step_reconfigure_sms_verify(self, user_input: dict[str, Any] = None) -> FlowResult:
-        """重新配置 - 验证短信验证码"""
-        reconfigure_entry = self._get_reconfigure_entry()
+        """重新配置 - SMS 验证码验证"""
         errors = {}
 
         if user_input is not None:
@@ -279,33 +381,28 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                 errors[CONF_SMS_CODE] = validation_error
             else:
                 try:
-                    # 验证验证码并登录
                     result = await WenzhouWaterSMSLogin.login_with_sms(
                         self._mobile, code, self._verify_id
                     )
                     access_token = result.get("authToken")
-                    if not access_token:
-                        errors["base"] = "login_failed"
-                    else:
+                    if access_token:
                         self._access_token = access_token
                         return await self.async_step_reconfigure_select_meter()
                 except WenzhouWaterAPIError as e:
                     _LOGGER.error(f"SMS login failed: {e}")
                     errors["base"] = "invalid_code"
 
-        data_schema = vol.Schema({
-            vol.Required(CONF_SMS_CODE): str,
-        })
-
         return self.async_show_form(
             step_id="reconfigure_sms_verify",
-            data_schema=data_schema,
+            data_schema=vol.Schema({
+                vol.Required(CONF_SMS_CODE): str,
+            }),
             errors=errors,
             description_placeholders={"mobile": self._mobile[:3] + "****" + self._mobile[7:]},
         )
 
     async def async_step_reconfigure_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
-        """重新配置 - 选择水表和更新日期（支持多水表）"""
+        """重新配置 - 选择水表"""
         reconfigure_entry = self._get_reconfigure_entry()
         errors = {}
 
@@ -363,13 +460,11 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                     title=title,
                 )
 
-        # 读取当前值
         current_cards = reconfigure_entry.data.get(CONF_METER_CARDS, [])
         current_day = reconfigure_entry.data.get(
             CONF_SCAN_INTERVAL,
             reconfigure_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_VALUE)
         )
-        # 兼容旧格式
         if isinstance(current_cards, list) and len(current_cards) > 0:
             if len(current_cards) == len(meter_cards):
                 current_selection = "__all__"
@@ -396,8 +491,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
     @staticmethod
     async def async_migrate_entry(hass, config_entry):
         """迁移配置到新版本"""
-        # v2.0.0 只是简化了登录流程，数据结构没有变化
-        # VERSION 3 -> 4 无需数据迁移，直接返回原配置
         _LOGGER.debug("Migration from VERSION 3 to 4 - no changes needed")
         return config_entry
 
@@ -412,7 +505,6 @@ class WenzhouWaterOptionsFlow(OptionsFlow):
     """温州水务选项流程 - 修改更新日期"""
 
     def __init__(self, entry: ConfigEntry):
-        """初始化选项流程"""
         self.entry = entry
 
     async def async_step_init(self, user_input: dict[str, Any] = None) -> FlowResult:
