@@ -28,7 +28,9 @@
 1. 重启 Home Assistant
 2. 进入 设置 → 设备与服务 → 添加集成
 3. 搜索"温州水务"并添加
-4. 输入水表号和户号
+4. **输入注册在水务账户的手机号**，接收验证码
+5. 输入短信验证码
+6. 选择要监控的水表和每月更新日期
 
 ## 仪表盘卡片
 
@@ -36,23 +38,27 @@
 
 推荐使用 [统一账单卡片](https://github.com/C3H3-AI/ha-utility-bill-card)，同时支持温州水务和华润燃气。
 
-1. **添加资源引用**
-   - 进入 设置 → 仪表盘 → 资源
-   - 点击"添加资源"
-   - URL: `/local/community/utility-bill-card/utility-bill-card.js`
-   - 类型: 选择 **JavaScript 模块**
+1. **通过 HACS 安装卡片**
+   - 在 HACS → 仪表盘 中搜索"utility-bill-card"
+   - 或手动添加仓库：`https://github.com/C3H3-AI/ha-utility-bill-card`
 
 2. **添加卡片到仪表盘**
    - 打开任意仪表盘，点击右上角"编辑"
    - 点击"添加卡片"
-   - 选择"手动配置"（或在搜索中搜索）
+   - 选择"手动配置"
    - 粘贴以下配置：
 
    ```yaml
-   type: custom:utility-bill-card
+   type: custom:ha-utility-bill-card
    entity: sensor.wenzhou_water_账户余额
    title: 温州水务
    ```
+
+## 版本历史
+
+- **v2.0.0**: 取消手动 Token 登录，仅支持短信验证码登录，简化配置流程
+- **v1.9.0**: 新增短信验证码登录方式
+- **v1.7.0**: 支持多水表和月度轮询
 
 ## 支持
 
