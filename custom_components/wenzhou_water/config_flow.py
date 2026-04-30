@@ -1,9 +1,11 @@
-"""温州水务配置流程 - v2.0.3
+"""温州水务配置流程 - v2.0.4
+v2.0.4:
+  - 移除 get_user_info 验证（SMS token 对该接口返回 401，导致误报 invalid_code）
 v2.0.3:
   - 修复 async_show_form 的 description 参数在 HA 2026.4.3 中不支持导致的 500 错误
   - 新增 strings.json 翻译文件
 v2.0.2:
-  - 修复 async_migrate_entry 返回 True 而非 config_entry 导致的 500 错误
+  - 修复 async_migrate_entry 返回 True 而非 config_entry 导致的 500 错误（非根因）
 v2.0.0:
   - 取消手动 Token 登录方式，仅支持短信验证码登录
   - 简化配置流程，直接进入手机号输入步骤
@@ -138,15 +140,11 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                     if not access_token:
                         errors["base"] = "login_failed"
                     else:
-                        # 验证Token是否有效
-                        api = WenzhouWaterAPI(access_token)
-                        user_info = await api.get_user_info()
-                        if not user_info:
-                            errors["base"] = "login_failed"
-                        else:
-                            await self.async_set_unique_id(access_token[:16])
-                            self._access_token = access_token
-                            return await self.async_step_select_meter()
+                        # SMS 登录成功，直接保存 token 进入水表选择
+                        # 注意：get_user_info 接口对 SMS token 返回 401，故跳过此验证
+                        await self.async_set_unique_id(access_token[:16])
+                        self._access_token = access_token
+                        return await self.async_step_select_meter()
                 except WenzhouWaterAPIError as e:
                     _LOGGER.error(f"SMS login failed: {e}")
                     errors["base"] = "invalid_code"
@@ -289,14 +287,8 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                     if not access_token:
                         errors["base"] = "login_failed"
                     else:
-                        # 验证Token是否有效
-                        api = WenzhouWaterAPI(access_token)
-                        user_info = await api.get_user_info()
-                        if not user_info:
-                            errors["base"] = "login_failed"
-                        else:
-                            self._access_token = access_token
-                            return await self.async_step_reconfigure_select_meter()
+                        self._access_token = access_token
+                        return await self.async_step_reconfigure_select_meter()
                 except WenzhouWaterAPIError as e:
                     _LOGGER.error(f"SMS login failed: {e}")
                     errors["base"] = "invalid_code"
