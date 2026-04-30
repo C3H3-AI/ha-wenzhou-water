@@ -1,7 +1,9 @@
-"""温州水务配置流程 - v2.1.0
+"""温州水务配置流程 - v2.1.1
+v2.1.1:
+  - 修复 api.py 请求头：X-MCS-CHANNEL=2（非1），移除 Authorization 头等错误 header
+  - 短信登录 token 现在可以正常访问数据 API
 v2.1.0:
-  - 恢复手动 Token 登录方式（SMS 登录获取的 token 无法访问数据 API）
-  - 第一步选择登录方式：短信验证码登录 / 手动输入 Token
+  - 恢复手动 Token 登录方式（保留备用）
 v2.0.4:
   - 移除 get_user_info 验证（SMS token 对该接口返回 401，导致误报 invalid_code）
 v2.0.3:
