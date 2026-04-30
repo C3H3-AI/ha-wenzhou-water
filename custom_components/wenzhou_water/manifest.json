@@ -1,7 +1,7 @@
 {
   "domain": "wenzhou_water",
   "name": "温州水务",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "config_flow": true,
   "documentation": "https://github.com/C3H3-AI/ha-wenzhou-water",
   "requirements": [],
