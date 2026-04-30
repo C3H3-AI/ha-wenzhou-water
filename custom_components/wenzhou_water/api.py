@@ -28,14 +28,17 @@ class WenzhouWaterAPI:
     def __init__(self, access_token: str):
         self.access_token = access_token
         self._headers = {
-            "Authorization": f"Bearer {access_token}",
+            # 注意：HAR 抓包显示小程序只用 X-MCS-AUTH-TOKEN，没有 Authorization
             "X-MCS-AUTH-TOKEN": access_token,
+            "X-MCS-CHANNEL": "2",
             "Content-Type": "application/json",
-            "X-MCS-CHANNEL": "1",
-            "x-web-xhr": "1",
-            "x-3h-account-type": "mcs",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh,en-US;q=0.9,en;q=0.8,zh-CN;q=0.7",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf254186b) XWEB/19481",
             "Referer": "https://servicewechat.com/wxe8c4cb0f78106a50/43/page-frame.html",
+            "sec-ch-ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "Windows",
         }
 
     @staticmethod
