@@ -1,0 +1,111 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "温州水务 - 手机号登录",
+        "description": "请输入注册在水务账户的手机号，点击提交后将向该手机号发送验证码短信。",
+        "data": {
+          "mobile": "手机号"
+        },
+        "error": {
+          "mobile": "请输入正确的11位手机号",
+          "base": {
+            "sms_send_failed": "验证码发送失败，请检查手机号是否正确",
+            "unknown": "发生未知错误"
+          }
+        }
+      },
+      "sms_verify": {
+        "title": "温州水务 - 验证码验证",
+        "description": "验证码已发送至 **{mobile}**，请输入收到的6位短信验证码。",
+        "data": {
+          "sms_code": "6位验证码"
+        },
+        "error": {
+          "sms_code": "请输入6位数字验证码",
+          "base": {
+            "invalid_code": "验证码错误或已过期，请重新发送",
+            "login_failed": "登录失败，请重试"
+          }
+        }
+      },
+      "select_meter": {
+        "title": "温州水务 - 选择水表",
+        "description": "设置每月更新日期。数据将在每月该日期的 08:00 自动刷新。",
+        "data": {
+          "meter_card_id": "选择水表",
+          "scan_interval": "每月几号更新"
+        },
+        "error": {
+          "scan_interval": "请输入1-31之间的数字",
+          "base": {
+            "no_meters": "未查询到您的水表信息",
+            "invalid_token": "Token无效，请重新登录",
+            "missing_token": "缺少登录凭证，请重新开始配置"
+          }
+        }
+      },
+      "reconfigure": {
+        "title": "温州水务 - 重新登录",
+        "description": "请输入注册在水务账户的手机号以重新验证。",
+        "data": {
+          "mobile": "手机号"
+        },
+        "error": {
+          "mobile": "请输入正确的11位手机号",
+          "base": {
+            "sms_send_failed": "验证码发送失败，请检查手机号是否正确"
+          }
+        }
+      },
+      "reconfigure_sms_verify": {
+        "title": "温州水务 - 验证码验证",
+        "description": "验证码已发送至 **{mobile}**，请输入收到的6位短信验证码。",
+        "data": {
+          "sms_code": "6位验证码"
+        },
+        "error": {
+          "sms_code": "请输入6位数字验证码",
+          "base": {
+            "invalid_code": "验证码错误或已过期",
+            "login_failed": "登录失败，请重试"
+          }
+        }
+      },
+      "reconfigure_select_meter": {
+        "title": "温州水务 - 选择水表",
+        "description": "设置每月更新日期。数据将在每月该日期的 08:00 自动刷新。",
+        "data": {
+          "meter_card_id": "选择水表",
+          "scan_interval": "每月几号更新"
+        },
+        "error": {
+          "scan_interval": "请输入1-31之间的数字",
+          "base": {
+            "no_meters": "未查询到您的水表信息",
+            "invalid_token": "Token无效，请重新登录"
+          }
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "该账户已配置",
+      "cannot_reconfigure": "无法重新配置",
+      "missing_token": "缺少登录凭证，请重新开始"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "温州水务 - 更新日期",
+        "description": "设置每月更新日期，修改后下次轮询将按照新的日期执行。",
+        "data": {
+          "scan_interval": "每月几号更新"
+        },
+        "error": {
+          "scan_interval": "请输入1-31之间的数字"
+        }
+      }
+    }
+  }
+}

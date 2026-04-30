@@ -1,4 +1,7 @@
-"""温州水务配置流程 - v2.0.2
+"""温州水务配置流程 - v2.0.3
+v2.0.3:
+  - 修复 async_show_form 的 description 参数在 HA 2026.4.3 中不支持导致的 500 错误
+  - 新增 strings.json 翻译文件
 v2.0.2:
   - 修复 async_migrate_entry 返回 True 而非 config_entry 导致的 500 错误
 v2.0.0:
@@ -114,7 +117,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             step_id="user",
             data_schema=data_schema,
             errors=errors,
-            description="请输入注册在水务账户的手机号\n\n点击下一步后将向该手机号发送验证码短信",
         )
 
     async def async_step_sms_verify(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -158,7 +160,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             data_schema=data_schema,
             errors=errors,
             description_placeholders={"mobile": self._mobile[:3] + "****" + self._mobile[7:]},
-            description="验证码已发送至 **{{mobile}}**\n\n请输入收到的6位短信验证码",
         )
 
     async def async_step_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -232,7 +233,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             data_schema=data_schema,
             errors=errors,
             description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
-            description="{{hint}}\n\n轮询说明：数据将在每月该日期的 08:00 自动刷新，无需手动操作。",
         )
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -267,7 +267,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             step_id="reconfigure",
             data_schema=data_schema,
             errors=errors,
-            description="请输入注册在水务账户的手机号以重新验证\n\n点击下一步后将向该手机号发送验证码短信",
         )
 
     async def async_step_reconfigure_sms_verify(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -311,7 +310,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             data_schema=data_schema,
             errors=errors,
             description_placeholders={"mobile": self._mobile[:3] + "****" + self._mobile[7:]},
-            description="验证码已发送至 **{{mobile}}**\n\n请输入收到的6位短信验证码",
         )
 
     async def async_step_reconfigure_select_meter(self, user_input: dict[str, Any] = None) -> FlowResult:
@@ -401,7 +399,6 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             data_schema=data_schema,
             errors=errors,
             description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
-            description="{{hint}}\n\n轮询说明：数据将在每月该日期的 08:00 自动刷新，无需手动操作。",
         )
 
     @staticmethod
@@ -456,5 +453,4 @@ class WenzhouWaterOptionsFlow(OptionsFlow):
             data_schema=data_schema,
             errors=errors,
             description_placeholders={"hint": "设置每月{{day}}日自动更新数据（1-31日）"},
-            description="{{hint}}\n\n修改后，下次轮询将按照新的日期执行。",
         )
