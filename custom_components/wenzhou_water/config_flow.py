@@ -406,8 +406,9 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
     async def async_migrate_entry(hass, config_entry):
         """迁移配置到新版本"""
         # v2.0.0 只是简化了登录流程，数据结构没有变化
-        # VERSION 3 -> 4 无需数据迁移
-        return True
+        # VERSION 3 -> 4 无需数据迁移，直接返回原配置
+        _LOGGER.debug("Migration from VERSION 3 to 4 - no changes needed")
+        return config_entry
 
     @staticmethod
     @callback
