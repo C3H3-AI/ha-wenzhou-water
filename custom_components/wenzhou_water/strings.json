@@ -2,145 +2,62 @@
   "config": {
     "step": {
       "user": {
-        "title": "温州水务 - 选择登录方式",
-        "description": "请选择登录方式\n\n- **手动输入 Token**：推荐，通过抓包获取的长期有效 Token\n- **短信验证码登录**：通过手机号接收验证码登录（返回的 Token 可能无法访问数据 API）",
-        "data": {
-          "login_method": "登录方式"
+        "title": "选择登录方式",
+        "description": "选择用于登录温州水务账号的方式",
+        "menu_options": {
+          "sms_login": "短信验证码登录",
+          "wx_qr_login": "微信扫码登录"
         }
       },
-      "manual_token": {
-        "title": "温州水务 - 手动输入 Token",
-        "description": "请粘贴从微信小程序抓包获取的 Access Token。\n\n打开温州水务微信小程序 → 触发任意API请求 → 在请求头中找到 `Authorization: Bearer xxx` 或 `X-MCS-AUTH-TOKEN` 的值。",
-        "data": {
-          "access_token": "Access Token"
-        },
-        "error": {
-          "access_token": "Token 格式不正确",
-          "base": {
-            "invalid_token": "Token 无效，无法获取水表信息",
-            "no_meters": "未查询到水表信息"
-          }
-        }
-      },
-      "sms": {
-        "title": "温州水务 - 短信验证码登录",
-        "description": "请输入注册在水务账户的手机号，点击提交后将向该手机号发送验证码短信。",
+      "sms_login": {
+        "title": "短信登录",
+        "description": "请输入注册在水务账户的手机号",
         "data": {
           "mobile": "手机号"
-        },
-        "error": {
-          "mobile": "请输入正确的11位手机号",
-          "base": {
-            "sms_send_failed": "验证码发送失败，请检查手机号是否正确"
-          }
         }
       },
       "sms_verify": {
-        "title": "温州水务 - 验证码验证",
-        "description": "验证码已发送至 **{mobile}**，请输入收到的6位短信验证码。",
+        "title": "输入短信验证码",
+        "description": "验证码已发送至: {phone}",
         "data": {
           "sms_code": "6位验证码"
-        },
-        "error": {
-          "sms_code": "请输入6位数字验证码",
-          "base": {
-            "invalid_code": "验证码错误或已过期",
-            "sms_token_invalid": "短信登录获取的 Token 无法访问数据 API，请使用「手动输入 Token」方式",
-            "no_meters": "未查询到水表信息"
-          }
+        }
+      },
+      "qr_login": {
+        "title": "微信扫码登录",
+        "description": "{description}",
+        "data": {
+          "refresh_qr_code": "刷新二维码"
         }
       },
       "select_meter": {
-        "title": "温州水务 - 选择水表",
-        "description": "设置每月更新日期。数据将在每月该日期的 08:00 自动刷新。",
+        "title": "选择水表",
+        "description": "数据将在每月 {day} 日 08:00 自动刷新",
         "data": {
-          "meter_card_id": "选择水表",
+          "meter_card_id": "水表",
           "scan_interval": "每月几号更新"
-        },
-        "error": {
-          "scan_interval": "请输入1-31之间的数字",
-          "base": {
-            "no_meters": "未查询到您的水表信息",
-            "invalid_token": "Token无效，请重新登录",
-            "missing_token": "缺少登录凭证，请重新开始配置"
-          }
-        }
-      },
-      "reconfigure": {
-        "title": "温州水务 - 重新配置",
-        "description": "选择登录方式以重新获取 Token",
-        "data": {
-          "login_method": "登录方式"
-        }
-      },
-      "reconfigure_manual_token": {
-        "title": "温州水务 - 手动输入 Token",
-        "data": {
-          "access_token": "Access Token"
-        },
-        "error": {
-          "access_token": "Token 格式不正确",
-          "base": {
-            "invalid_token": "Token 无效",
-            "no_meters": "未查询到水表信息"
-          }
-        }
-      },
-      "reconfigure_sms": {
-        "title": "温州水务 - 短信验证码",
-        "data": {
-          "mobile": "手机号"
-        },
-        "error": {
-          "base": {
-            "sms_send_failed": "验证码发送失败"
-          }
-        }
-      },
-      "reconfigure_sms_verify": {
-        "title": "温州水务 - 验证码",
-        "description": "验证码已发送至 **{mobile}**",
-        "data": {
-          "sms_code": "验证码"
-        },
-        "error": {
-          "base": {
-            "invalid_code": "验证码错误"
-          }
-        }
-      },
-      "reconfigure_select_meter": {
-        "title": "温州水务 - 选择水表",
-        "data": {
-          "meter_card_id": "选择水表",
-          "scan_interval": "每月几号更新"
-        },
-        "error": {
-          "scan_interval": "请输入1-31之间的数字",
-          "base": {
-            "no_meters": "未查询到水表信息",
-            "invalid_token": "Token无效"
-          }
         }
       }
     },
+    "error": {
+      "cannot_connect": "网络异常",
+      "invalid_auth": "登录信息无效",
+      "qr_not_scanned": "请使用微信扫码后点击提交",
+      "scan_expired": "二维码已过期，请刷新",
+      "token_failed": "Token获取失败",
+      "unknown": "未知错误"
+    },
     "abort": {
-      "already_configured": "该账户已配置",
-      "cannot_reconfigure": "无法重新配置",
-      "missing_token": "缺少登录凭证"
+      "already_configured": "账号已添加，请勿重复添加",
+      "no_meters": "未找到水表"
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "温州水务 - 更新日期",
-        "description": "设置每月更新日期，修改后下次轮询将按照新的日期执行。",
-        "data": {
-          "scan_interval": "每月几号更新"
-        },
-        "error": {
-          "scan_interval": "请输入1-31之间的数字"
-        }
+        "data": { "scan_interval": "每月几号更新" },
+        "error": { "scan_interval": "请输入1-31" }
       }
     }
   }

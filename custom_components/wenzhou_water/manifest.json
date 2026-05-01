@@ -1,19 +1,11 @@
 {
   "domain": "wenzhou_water",
   "name": "温州水务",
-  "version": "2.1.1",
+  "version": "5.0.0",
   "config_flow": true,
   "documentation": "https://github.com/C3H3-AI/ha-wenzhou-water",
-  "requirements": [],
+  "requirements": ["aiohttp"],
   "codeowners": ["@C3H3-AI"],
   "integration_type": "device",
-  "iot_class": "cloud_polling",
-  "exports": {
-    "PLATFORMS": ["sensor", "button"]
-  },
-  "codewind_card": {
-    "path": "../www/community/utility-bill-card/utility-bill-card.js",
-    "title": "公用事业账单卡片",
-    "description": "统一支持温州水务和华润燃气的仪表盘卡片"
-  }
+  "iot_class": "cloud_polling"
 }

@@ -366,6 +366,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # 创建 coordinator（支持多水表）
     coordinator = WenzhouWaterDataUpdateCoordinator(hass, entry.entry_id, access_token, card_ids, day_of_month)
 
+    # 保存 coordinator 到 hass.data，供 button 平台使用
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][f"{entry.entry_id}_coordinator"] = coordinator
+
     # 首次刷新
     await coordinator.async_config_entry_first_refresh()
 
