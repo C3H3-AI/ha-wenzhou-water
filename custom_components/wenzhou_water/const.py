@@ -1,10 +1,4 @@
-"""温州水务集成常量 - v5.0.0
-
-v5.0.0: 基于 wz_water_sg 架构重写
-  - 新增 ConfigFlow step ID 常量
-  - 新增错误码常量
-  - 新增登录方式常量
-"""
+"""温州水务集成常量"""
 
 # 平台
 DOMAIN = "wenzhou_water"
@@ -36,17 +30,23 @@ SCAN_INTERVAL_UNITS = {
 DEFAULT_SCAN_INTERVAL_VALUE = 1
 DEFAULT_SCAN_INTERVAL_UNIT = "month"
 
-# ConfigFlow Step IDs（wz_water_sg 架构）
+# ConfigFlow Step IDs
 STEP_USER = "user"
 STEP_SMS_LOGIN = "sms_login"
 STEP_SMS_VERIFY = "sms_verify"
 STEP_WX_QR_LOGIN = "wx_qr_login"
 STEP_QR_LOGIN = "qr_login"
 STEP_SELECT_METER = "select_meter"
+STEP_RECONFIGURE = "reconfigure"
+STEP_RECONFIGURE_SMS = "reconfigure_sms"
+STEP_RECONFIGURE_SMS_VERIFY = "reconfigure_sms_verify"
+STEP_RECONFIGURE_QR = "reconfigure_qr"
+STEP_RECONFIGURE_SELECT_METER = "reconfigure_select_meter"
 
 # 登录方式
 LOGIN_SMS = "sms"
 LOGIN_WECHAT = "wechat"
+LOGIN_TOKEN = "token"
 
 # 错误码
 ERROR_CANNOT_CONNECT = "cannot_connect"

@@ -1,10 +1,12 @@
-"""温州水务Home Assistant集成 - v5.0.0
+"""温州水务Home Assistant集成 - v3.0.0
 
-v5.0.0: 基于 wz_water_sg 架构重写
-  - ConfigFlow 使用 async_show_menu 选择登录方式
-  - 微信扫码使用微信服务器图片 URL（移除 segno 依赖）
-  - 独立 qr_login / validate_qr_login 步骤
-  - 简化 __init__，移除旧版迁移代码
+v3.0.0: 在 v2.1.1 基础上补充南网（wz_water_sg）特性
+  - async_show_menu 选择登录方式
+  - 新增微信扫码登录（微信服务器 <img>，移除 segno）
+  - _abort_if_unique_id_configured() 防重复添加
+  - reconfigure 流程支持微信扫码
+  - 修复 state_class 兼容性（device_class + state_class）
+  - 修复 Store 导入路径（helpers.storage）
 """
 import logging
 
@@ -44,7 +46,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     v1 → v2: 添加 scan_interval / scan_interval_unit
     v2 → v3: 添加 meter_cards（多水表单条记录）
     v3 → v4: 纯短信登录，三步流程
-    v4 → v5: 基于 wz_water_sg 架构重写（async_show_menu + 微信服务器二维码）
+    v4 → v5: 添加 login_type 字段 + 微信扫码登录支持
     """
     _LOGGER.info(f"温州水务: 迁移 config entry 从 version {config_entry.version}")
 
@@ -90,7 +92,7 @@ async def async_token_expired_notification(hass: HomeAssistant, entry_id: str) -
             "create",
             {
                 "title": "⚠️ 温州水务登录已过期",
-                "message": "温州水务集成的登录令牌已过期（有效期约6个月），数据将停止更新。\n\n请点击下方按钮重新登录：\n\n[重新配置 →](config/config_entries/config_flow?config_flow=wenzhou_water)\n\n进入「设置 → 设备与服务 → 温州水务 → 重新配置」，输入手机号接收验证码即可。",
+                "message": "温州水务集成的登录令牌已过期（有效期约6个月），数据将停止更新。\n\n请点击下方按钮重新登录：\n\n[重新配置 →](config/config_entries/config_flow?config_flow=wenzhou_water)\n\n进入「设置 → 设备与服务 → 温州水务 → 重新配置」，选择微信扫码或短信验证码登录即可。",
                 "notification_id": f"wenzhou_water_token_expired_{entry_id}",
             },
             blocking=True,

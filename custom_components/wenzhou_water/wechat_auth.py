@@ -1,8 +1,7 @@
-"""温州水务微信扫码登录模块 - v3.0.0
-v3.0.0:
-  - 彻底移除 segno！微信页面自带二维码图片
-  - WechatLoginSession 新增 qrcode_image_url 字段
-  - 删除 build_qr_data_url() / build_qr_to_file() 函数
+"""温州水务微信扫码登录模块
+
+移除 segno 依赖，微信页面自带二维码图片。
+WechatLoginSession 使用 qrcode_image_url（微信服务器直供）。
 """
 from __future__ import annotations
 

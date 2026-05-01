@@ -1,4 +1,7 @@
-"""温州水务传感器 - v1.9.0
+"""温州水务传感器 - v3.0.0
+v3.0.0:
+  - 修复 state_class 兼容性（device_class=water/monetary + state_class）
+  - 修复 Store 导入路径（helpers.storage）
 新增 v1.9.0:
   - Token过期后自动发送通知提醒用户重新登录
 修复 v1.7.9:
@@ -77,41 +80,41 @@ SENSOR_TYPES = {
         "icon": "mdi:cash",
         "unit": "¥",
         "device_class": "monetary",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     "total_arrears": {
         "name": "总欠费",
         "icon": "mdi:alert-circle",
         "unit": "¥",
         "device_class": "monetary",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     # 最新账单
     "last_reading": {
         "name": "上期读数",
         "icon": "mdi:counter",
         "unit": "m³",
-        "state_class": "measurement",
+        "state_class": "total_increasing",
     },
     "current_reading": {
         "name": "本期读数",
         "icon": "mdi:counter",
         "unit": "m³",
-        "state_class": "measurement",
+        "state_class": "total_increasing",
     },
     "water_used": {
         "name": "本期用水量",
         "icon": "mdi:water",
         "unit": "m³",
         "device_class": "water",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     "bill_amount": {
         "name": "账单金额",
         "icon": "mdi:receipt",
         "unit": "¥",
         "device_class": "monetary",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     "last_read_date": {
         "name": "上期抄表日期",
@@ -128,33 +131,29 @@ SENSOR_TYPES = {
         "icon": "mdi:calendar-clock",
         "unit": None,
     },
-    # 阶梯信息
+    # 阶梯信息（单价不是货币总量，去掉 device_class=monetary）
     "water_price_step1": {
         "name": "一阶水价",
         "icon": "mdi:currency-cny",
         "unit": "¥/m³",
-        "device_class": "monetary",
         "state_class": "measurement",
     },
     "water_price_step2": {
         "name": "二阶水价",
         "icon": "mdi:currency-cny",
         "unit": "¥/m³",
-        "device_class": "monetary",
         "state_class": "measurement",
     },
     "water_price_step3": {
         "name": "三阶水价",
         "icon": "mdi:currency-cny",
         "unit": "¥/m³",
-        "device_class": "monetary",
         "state_class": "measurement",
     },
     "water_price_sewage": {
         "name": "污水处理费",
         "icon": "mdi:recycle",
         "unit": "¥/m³",
-        "device_class": "monetary",
         "state_class": "measurement",
     },
     "price_threshold1": {
@@ -174,21 +173,21 @@ SENSOR_TYPES = {
         "icon": "mdi:numeric-1-box",
         "unit": "m³",
         "device_class": "water",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     "step2_usage": {
         "name": "本期二阶用水量",
         "icon": "mdi:numeric-2-box",
         "unit": "m³",
         "device_class": "water",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     "step3_usage": {
         "name": "本期三阶用水量",
         "icon": "mdi:numeric-3-box",
         "unit": "m³",
         "device_class": "water",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     "current_step": {
         "name": "当前阶梯",
@@ -201,7 +200,7 @@ SENSOR_TYPES = {
         "icon": "mdi:numeric-1-box-outline",
         "unit": "m³",
         "device_class": "water",
-        "state_class": "measurement",
+        "state_class": "total_increasing",
     },
     "level_max": {
         "name": "一阶上限",
@@ -214,7 +213,7 @@ SENSOR_TYPES = {
         "icon": "mdi:water-outline",
         "unit": "m³",
         "device_class": "water",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     "person_count": {
         "name": "家庭人口",
@@ -244,14 +243,14 @@ SENSOR_TYPES = {
         "icon": "mdi:chart-line",
         "unit": "m³",
         "device_class": "water",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     "estimated_bill_amount": {
         "name": "预估本月账单",
         "icon": "mdi:calculator",
         "unit": "¥",
         "device_class": "monetary",
-        "state_class": "measurement",
+        "state_class": "total",
     },
     "account_warning": {
         "name": "账户预警",
@@ -267,7 +266,6 @@ SENSOR_TYPES = {
         "name": "历史月均用水",
         "icon": "mdi:history",
         "unit": "m³",
-        "device_class": "water",
         "state_class": "measurement",
     },
     "usage_vs_avg": {
@@ -438,7 +436,7 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
         """获取指定水表的历史 Store 实例（延迟初始化，复用）"""
         if self._history_stores.get(card_id) is None:
             try:
-                from homeassistant.helpers.store import Store
+                from homeassistant.helpers.storage import Store
                 self._history_stores[card_id] = Store(
                     hass=self.hass,
                     key=f"{DOMAIN}_history_{card_id}",
