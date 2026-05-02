@@ -1,4 +1,6 @@
-"""温州水务传感器 - v3.0.0
+"""温州水务传感器 - v3.0.1
+v3.0.1:
+  - 文档同步更新
 v3.0.0:
   - 修复 state_class 兼容性（device_class=water/monetary + state_class）
   - 修复 Store 导入路径（helpers.storage）
