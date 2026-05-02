@@ -1,5 +1,6 @@
-"""温州水务Home Assistant集成 - v3.0.0
+"""温州水务Home Assistant集成 - v3.0.1
 
+v3.0.1: 文档同步更新
 v3.0.0: 在 v2.1.1 基础上补充南网（wz_water_sg）特性
   - async_show_menu 选择登录方式
   - 新增微信扫码登录（微信服务器 <img>，移除 segno）
