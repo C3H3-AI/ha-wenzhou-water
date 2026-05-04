@@ -1,13 +1,10 @@
-"""温州水务Home Assistant集成 - v3.0.1
+"""温州水务Home Assistant集成 - v3.1.0 测试版
 
-v3.0.1: 文档同步更新
-v3.0.0: 在 v2.1.1 基础上补充南网（wz_water_sg）特性
-  - async_show_menu 选择登录方式
-  - 新增微信扫码登录（微信服务器 <img>，移除 segno）
-  - _abort_if_unique_id_configured() 防重复添加
-  - reconfigure 流程支持微信扫码
-  - 修复 state_class 兼容性（device_class + state_class）
-  - 修复 Store 导入路径（helpers.storage）
+v3.1.0: 测试版重构
+  - 初始页面直接显示二维码
+  - 短信登录放在二维码下方
+  - 自动刷新二维码
+  - 初始日期改为7日
 """
 import logging
 

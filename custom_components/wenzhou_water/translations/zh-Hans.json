@@ -27,7 +27,8 @@
         "title": "微信扫码登录",
         "description": "{description}",
         "data": {
-          "refresh_qr_code": "刷新二维码"
+          "refresh_qr_code": "刷新二维码   扫码后提交，需短信验证，输入手机号后提交",
+          "mobile": "手机号"
         }
       },
       "select_meter": {
@@ -64,7 +65,8 @@
         "title": "重新配置 - 微信扫码",
         "description": "{description}",
         "data": {
-          "refresh_qr_code": "刷新二维码"
+          "refresh_qr_code": "刷新二维码   扫码后提交，需短信验证，输入手机号后提交",
+          "mobile": "手机号"
         }
       },
       "reconfigure_select_meter": {

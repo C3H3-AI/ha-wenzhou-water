@@ -2,12 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "选择登录方式",
-        "description": "选择用于登录温州水务账号的方式",
-        "menu_options": {
-          "sms_login": "短信验证码登录",
-          "wx_qr_login": "微信扫码登录"
-        }
+        "title": "温州水务",
+        "description": "请使用微信扫描下方二维码授权登录"
       },
       "sms_login": {
         "title": "短信登录",
@@ -25,9 +21,10 @@
       },
       "qr_login": {
         "title": "微信扫码登录",
-        "description": "{description}",
+        "description": "",
         "data": {
-          "refresh_qr_code": "刷新二维码"
+          "mobile": "手机号",
+          "refresh_qr_code": "刷新二维码   扫码后提交，需短信验证，输入手机号后提交"
         }
       },
       "select_meter": {
@@ -39,12 +36,8 @@
         }
       },
       "reconfigure": {
-        "title": "重新配置 - 选择登录方式",
-        "description": "选择登录方式以更新令牌",
-        "menu_options": {
-          "reconfigure_sms": "短信验证码登录",
-          "reconfigure_qr": "微信扫码登录"
-        }
+        "title": "重新配置",
+        "description": "请使用微信扫描下方二维码授权登录"
       },
       "reconfigure_sms": {
         "title": "重新配置 - 短信登录",
@@ -62,9 +55,10 @@
       },
       "reconfigure_qr": {
         "title": "重新配置 - 微信扫码",
-        "description": "{description}",
+        "description": "",
         "data": {
-          "refresh_qr_code": "刷新二维码"
+          "mobile": "手机号",
+          "refresh_qr_code": "刷新二维码   扫码后提交，需短信验证，输入手机号后提交"
         }
       },
       "reconfigure_select_meter": {
@@ -89,6 +83,7 @@
     },
     "abort": {
       "already_configured": "账号已添加，请勿重复添加",
+      "reconfigure_successful": "重新配置成功",
       "no_meters": "未找到水表",
       "missing_token": "Token缺失"
     }
