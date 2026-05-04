@@ -53,7 +53,7 @@ from .const import (
     ERROR_TOKEN_FAILED,
     ERROR_UNKNOWN,
 )
-from .wechat_auth import async_start_weixin_login, WechatLoginResult
+from .wechat_auth import async_start_weixin_login, async_check_qr_status, WechatLoginResult
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,35 +83,7 @@ def _mask_mobile(mobile: str) -> str:
 
 
 async def _check_scan_once(session) -> WechatLoginResult:
-    import aiohttp
-    import re as _re
-
-    poll_url = f"{WX_POLL_URL}?uuid={session.uuid}&_=0"
-    headers = {"User-Agent": "Mozilla/5.0 Chrome/132"}
-    try:
-        async with aiohttp.ClientSession() as http:
-            async with http.get(
-                poll_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                text = await resp.text()
-
-        m = _re.search(r"window\.wx_code='([^']+)'", text)
-        if m and m.group(1):
-            code = m.group(1)
-            from .wechat_auth import _async_wx_to_token
-            token = await _async_wx_to_token(code)
-            if token:
-                return WechatLoginResult(success=True, token=token, message="登录成功")
-            return WechatLoginResult(success=False, message="token_failed")
-
-        err_m = _re.search(r"window\.wx_errcode=(\d+)", text)
-        if err_m and int(err_m.group(1)) == 400:
-            return WechatLoginResult(success=False, message="expired")
-
-    except Exception as e:
-        _LOGGER.warning(f"检查微信扫码状态异常: {e}")
-
-    return WechatLoginResult(success=False, message="scan_waiting")
+    return await async_check_qr_status(session)
 
 
 class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
@@ -149,7 +121,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             try:
                 self._wechat_session = await async_start_weixin_login()
                 self._qr_created_at = time.time()
-                qr_image_url = self._wechat_session.qrcode_image_url
+                qr_data_url = self._wechat_session.qrcode_data_url
             except Exception as e:
                 _LOGGER.error(f"二维码获取失败: {e}")
                 return self.async_show_form(
@@ -159,11 +131,11 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                     }),
                     errors=errors or {CONF_GENERAL_ERROR: ERROR_CANNOT_CONNECT},
                     description_placeholders={
-                        "description": "<p>二维码获取失败，请重试。</p>",
+                        "description": "二维码获取失败，请重试。",
                     },
                 )
         else:
-            qr_image_url = self._wechat_session.qrcode_image_url
+            qr_data_url = self._wechat_session.qrcode_data_url
 
         remaining = QR_REFRESH_INTERVAL
         if self._qr_created_at:
@@ -178,13 +150,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             }),
             errors=errors,
             description_placeholders={
-                "description": (
-                    '<div style="width:100%; display:flex; justify-content:center; align-items:center; margin-bottom:10px;">'
-                    f'<div style="width:50% !important; max-width:50% !important;">'
-                    f'<img src="{qr_image_url}" alt="微信二维码" style="width:100% !important; height:auto !important; display:block;"/>'
-                    '</div>'
-                    '</div>'
-                ),
+                "description": f"<style>.mobile-input input {{ width: 160px !important; max-width: 100% !important; }}</style>请使用微信扫描下方二维码登录\n\n![微信二维码]({qr_data_url})\n\n<div class='mobile-input'>手机号输入框</div>",
             },
         )
 
@@ -373,7 +339,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             try:
                 self._wechat_session = await async_start_weixin_login()
                 self._qr_created_at = time.time()
-                qr_image_url = self._wechat_session.qrcode_image_url
+                qr_data_url = self._wechat_session.qrcode_data_url
             except Exception as e:
                 _LOGGER.error(f"二维码获取失败: {e}")
                 return self.async_show_form(
@@ -383,11 +349,11 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
                     }),
                     errors=errors or {CONF_GENERAL_ERROR: ERROR_CANNOT_CONNECT},
                     description_placeholders={
-                        "description": "<p>二维码获取失败，请重试。</p>",
+                        "description": "二维码获取失败，请重试。",
                     },
                 )
         else:
-            qr_image_url = self._wechat_session.qrcode_image_url
+            qr_data_url = self._wechat_session.qrcode_data_url
 
         remaining = QR_REFRESH_INTERVAL
         if self._qr_created_at:
@@ -402,13 +368,7 @@ class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
             }),
             errors=errors,
             description_placeholders={
-                "description": (
-                    '<div style="width:100%; display:flex; justify-content:center; align-items:center; margin-bottom:10px;">'
-                    f'<div style="width:50% !important; max-width:50% !important;">'
-                    f'<img src="{qr_image_url}" alt="微信二维码" style="width:100% !important; height:auto !important; display:block;"/>'
-                    '</div>'
-                    '</div>'
-                ),
+                "description": f"请使用微信扫描下方二维码重新登录\n\n![微信二维码]({qr_data_url})",
             },
         )
 

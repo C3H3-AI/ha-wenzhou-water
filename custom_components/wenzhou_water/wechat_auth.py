@@ -1,24 +1,25 @@
 """温州水务微信扫码登录模块
 
-移除 segno 依赖，微信页面自带二维码图片。
-WechatLoginSession 使用 qrcode_image_url（微信服务器直供）。
+使用 segno 库生成本地二维码，实现尺寸可控。
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import random
 import re
 import urllib.request
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Optional
 
 import aiohttp
+import segno
 
 _LOGGER = logging.getLogger(__name__)
 
-# 温州水务微信 OAuth 配置
 WX_APPID = "wx7a3434ca2a0bb80d"
 WX_POLL_URL = "https://lp.open.weixin.qq.com/connect/l/qrconnect"
 WX_REDIRECT_URI = "https%3A%2F%2Fsw-os.wzgytz.com%2Flogin"
@@ -32,8 +33,9 @@ class WechatLoginSession:
     """微信登录会话"""
     uuid: str
     state: str
-    qrcode_image_url: str = ""  # 微信服务器直接提供的二维码图片 URL
-    qrcode_url: str = ""  # OAuth URL（备用）
+    qrcode_image_url: str = ""
+    qrcode_url: str = ""
+    qrcode_data_url: str = ""
 
 
 @dataclass(slots=True)
@@ -75,6 +77,32 @@ def _get_wx_uuid(state: str) -> Optional[str]:
     return None
 
 
+def _download_qr_image(url: str) -> Optional[bytes]:
+    """下载微信二维码图片"""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Chrome/132"})
+        resp = urllib.request.urlopen(req, timeout=15)
+        return resp.read()
+    except Exception as e:
+        _LOGGER.error(f"下载二维码图片失败: {e}")
+        return None
+
+
+def build_qr_data_url(qr_content: str, scale: int = 5) -> str:
+    """使用 segno 生成二维码并转为 data URL
+
+    Args:
+        qr_content: 二维码内容（URL 或文本）
+        scale: 缩放比例，控制二维码大小，默认 5
+               - scale=3: 约 150px
+               - scale=5: 约 250px
+               - scale=8: 约 400px
+    """
+    out = BytesIO()
+    segno.make(qr_content).save(out, kind="png", scale=scale, border=2)
+    return "data:image/png;base64," + base64.b64encode(out.getvalue()).decode("ascii")
+
+
 async def async_start_weixin_login() -> WechatLoginSession:
     """启动微信登录，获取 UUID 和二维码图片 URL"""
     state = str(random.random())
@@ -82,17 +110,57 @@ async def async_start_weixin_login() -> WechatLoginSession:
     if not uuid:
         raise RuntimeError("获取微信UUID失败")
 
-    # 微信页面直接提供了二维码图片 URL
     qrcode_image_url = f"{WX_BASE}/connect/qrcode/{uuid}"
+
+    # 下载微信二维码图片，用 segno 重新生成可控制尺寸的 data URL
+    qrcode_data_url = ""
+    try:
+        image_bytes = await asyncio.get_event_loop().run_in_executor(
+            None, _download_qr_image, qrcode_image_url
+        )
+        if image_bytes:
+            qrcode_data_url = build_qr_data_url(qrcode_image_url, scale=5)
+            _LOGGER.debug(f"二维码图片已重新生成: {len(image_bytes)} bytes")
+    except Exception as e:
+        _LOGGER.warning(f"重新生成二维码失败，使用原始URL: {e}")
+        qrcode_data_url = build_qr_data_url(qrcode_image_url, scale=5)
 
     session = WechatLoginSession(
         uuid=uuid,
         state=state,
         qrcode_image_url=qrcode_image_url,
         qrcode_url=_build_wx_oauth_url(state),
+        qrcode_data_url=qrcode_data_url,
     )
     _LOGGER.debug(f"微信登录会话已创建: uuid={uuid}")
     return session
+
+
+async def async_check_qr_status(session: WechatLoginSession) -> WechatLoginResult:
+    """检查二维码扫描状态"""
+    poll_url = f"{WX_POLL_URL}?uuid={session.uuid}&_=0"
+    headers = {"User-Agent": "Mozilla/5.0 Chrome/132"}
+    try:
+        async with aiohttp.ClientSession() as http:
+            async with http.get(poll_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                text = await resp.text()
+
+        m = re.search(r"window\.wx_code='([^']+)'", text)
+        if m and m.group(1):
+            code = m.group(1)
+            token = await _async_wx_to_token(code)
+            if token:
+                return WechatLoginResult(success=True, token=token, message="登录成功")
+            return WechatLoginResult(success=False, message="token_failed")
+
+        err_m = re.search(r"window\.wx_errcode=(\d+)", text)
+        if err_m and int(err_m.group(1)) == 400:
+            return WechatLoginResult(success=False, message="expired")
+
+    except Exception as e:
+        _LOGGER.warning(f"检查微信扫码状态异常: {e}")
+
+    return WechatLoginResult(success=False, message="scan_waiting")
 
 
 async def _async_wx_to_token(code: str) -> Optional[str]:
