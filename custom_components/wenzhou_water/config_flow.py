@@ -114,7 +114,7 @@ async def _check_scan_once(session) -> WechatLoginResult:
     return WechatLoginResult(success=False, message="scan_waiting")
 
 
-class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water_test"):
+class WenzhouWaterConfigFlow(ConfigFlow, domain="wenzhou_water"):
 
     VERSION = 5
 

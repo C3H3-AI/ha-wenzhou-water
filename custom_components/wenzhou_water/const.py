@@ -1,8 +1,8 @@
 """温州水务集成常量"""
 
 # 平台
-DOMAIN = "wenzhou_water_test"
-PLATFORM_NAME = "温州水务(测试)"
+DOMAIN = "wenzhou_water"
+PLATFORM_NAME = "温州水务"
 
 # API配置
 BASE_URL = "https://sw-os.wzgytz.com/v3/open-api"
