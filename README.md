@@ -1,6 +1,6 @@
 # 温州水务 - Home Assistant 集成
 
-![Version](https://img.shields.io/badge/version-v3.0.1-blue)
+![Version](https://img.shields.io/badge/version-v3.1.0-blue)
 ![HA Version](https://img.shields.io/badge/Home%20Assistant-2026.4%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
