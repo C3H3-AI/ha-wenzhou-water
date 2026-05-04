@@ -4,7 +4,7 @@
 ![HA Version](https://img.shields.io/badge/Home%20Assistant-2026.4%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
-乐清市温州水务集团智能水表数据接入 Home Assistant，支持短信验证码和微信扫码两种登录方式。
+温州水务集团智能水表数据接入 Home Assistant，支持短信验证码和微信扫码登录。
 
 ## 安装
 
