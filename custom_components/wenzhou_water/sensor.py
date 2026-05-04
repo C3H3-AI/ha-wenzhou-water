@@ -441,6 +441,7 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 from homeassistant.helpers.storage import Store
                 self._history_stores[card_id] = Store(
                     hass=self.hass,
+                    version=1,
                     key=f"{DOMAIN}_history_{card_id}",
                 )
             except Exception as e:
