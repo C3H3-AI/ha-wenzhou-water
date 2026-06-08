@@ -1,0 +1,78 @@
+# 温州水务 — 综合总览卡片
+# 精简版实体卡片，适合仪表盘首页快速查看
+# 包含所有核心指标：余额、用量、账单、阶梯、预警等
+
+type: entities
+title: 温州水务 · 总览
+state_color: true
+entities:
+  # --- 账户信息 ---
+  - entity: sensor.wenzhou_water_{card_id}_账户余额
+    name: 账户余额
+    icon: mdi:wallet
+  - entity: sensor.wenzhou_water_{card_id}_集成状态
+    name: 状态
+    icon: mdi:cloud-check
+  - entity: sensor.wenzhou_water_{card_id}_最后更新时间
+    name: 最后更新
+    icon: mdi:clock-outline
+
+  # --- 本期账单摘要 ---
+  - type: section
+    label: 本期账单
+  - entity: sensor.wenzhou_water_{card_id}_本期用水量
+    name: 本期用水量
+    icon: mdi:water
+    secondary_info: last-changed
+  - entity: sensor.wenzhou_water_{card_id}_账单金额
+    name: 本期账单
+    icon: mdi:cash
+    secondary_info: last-changed
+  - entity: sensor.wenzhou_water_{card_id}_缴费截止日期
+    name: 截止日期
+    icon: mdi:calendar-alert
+
+  # --- 环比对比 ---
+  - type: section
+    label: 环比对比
+  - entity: sensor.wenzhou_water_{card_id}_上月用水量
+    name: 上月用水
+    icon: mdi:water-minus
+  - entity: sensor.wenzhou_water_{card_id}_用水环比变化
+    name: 用水环比
+    icon: mdi:trending-up
+  - entity: sensor.wenzhou_water_{card_id}_上月账单金额
+    name: 上月账单
+    icon: mdi:receipt-text
+  - entity: sensor.wenzhou_water_{card_id}_账单环比变化
+    name: 账单环比
+    icon: mdi:cash-plus
+
+  # --- 阶梯信息 ---
+  - type: section
+    label: 阶梯进度
+  - entity: sensor.wenzhou_water_{card_id}_当前阶梯
+    name: 当前阶梯
+    icon: mdi:stairs
+  - entity: sensor.wenzhou_water_{card_id}_阶梯剩余量
+    name: 本阶剩余
+    icon: mdi:gauge
+  - entity: sensor.wenzhou_water_{card_id}_历史月均用水
+    name: 月均用水
+    icon: mdi:chart-bar
+  - entity: sensor.wenzhou_water_{card_id}_与均值对比
+    name: 与均值对比
+    icon: mdi:percent
+
+  # --- 预警 ---
+  - type: section
+    label: 预警与提示
+  - entity: sensor.wenzhou_water_{card_id}_账户预警
+    name: 预警
+    icon: mdi:alert-circle
+  - entity: sensor.wenzhou_water_{card_id}_预估本月账单
+    name: 预估账单
+    icon: mdi:calculator
+  - entity: sensor.wenzhou_water_{card_id}_距截止天数
+    name: 距截止天数
+    icon: mdi:timer-sand

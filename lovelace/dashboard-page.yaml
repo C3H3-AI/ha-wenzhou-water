@@ -1,0 +1,139 @@
+# 温州水务 — 一键仪表盘页面
+# 完整的仪表盘页面配置，包含所有卡片
+# 可直接复制到 HA 仪表盘 YAML 中
+
+title: 温州水务
+path: wenzhou-water
+icon: mdi:water
+badges: []
+cards:
+  # ===== 第一行：核心指标（2列） =====
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.wenzhou_water_{card_id}_本期用水量
+        name: 本期用水量
+        icon: mdi:water
+        unit: m³
+        state_color: true
+      - type: entity
+        entity: sensor.wenzhou_water_{card_id}_账单金额
+        name: 本期账单
+        icon: mdi:cash
+        unit: ¥
+        state_color: true
+      - type: entity
+        entity: sensor.wenzhou_water_{card_id}_账户余额
+        name: 账户余额
+        icon: mdi:wallet
+        unit: ¥
+        state_color: true
+
+  # ===== 第二行：环比指标（4列） =====
+  - type: glance
+    title: 环比对比
+    entities:
+      - entity: sensor.wenzhou_water_{card_id}_上月用水量
+        name: 上月用水
+      - entity: sensor.wenzhou_water_{card_id}_用水环比变化
+        name: 用水环比
+      - entity: sensor.wenzhou_water_{card_id}_上月账单金额
+        name: 上月账单
+      - entity: sensor.wenzhou_water_{card_id}_账单环比变化
+        name: 账单环比
+
+  # ===== 第三行：按月对比图（需要顶部的 apexcharts-card 配置） =====
+  - type: custom:apexcharts-card
+    graph_span: 12m
+    header:
+      show: true
+      title: 月度用水趋势
+      show_states: false
+    span:
+      start: month
+    series:
+      - entity: sensor.wenzhou_water_{card_id}_本期用水量
+        name: 用水量 (m³)
+        type: column
+        color: "#2196F3"
+        group_by:
+          func: last
+          duration: 1month
+        show:
+          legend_value: true
+          datalabels: true
+        data_generator: |
+          return entity.attributes.history_months.map((month, i) => ({
+            x: new Date(month.substring(0,4), month.substring(4,6)-1, 1).getTime(),
+            y: entity.attributes.history_usages[i]
+          }));
+      - entity: sensor.wenzhou_water_{card_id}_历史月均用水
+        name: 月均用水
+        type: line
+        color: "#FF9800"
+        stroke_width: 2
+        extend_to: now
+
+  - type: custom:apexcharts-card
+    graph_span: 12m
+    header:
+      show: true
+      title: 月度账单趋势
+      show_states: false
+    span:
+      start: month
+    series:
+      - entity: sensor.wenzhou_water_{card_id}_账单金额
+        name: 账单金额 (¥)
+        type: column
+        color: "#4CAF50"
+        group_by:
+          func: last
+          duration: 1month
+        show:
+          legend_value: true
+          datalabels: true
+        data_generator: |
+          return entity.attributes.history_months.map((month, i) => ({
+            x: new Date(month.substring(0,4), month.substring(4,6)-1, 1).getTime(),
+            y: entity.attributes.history_bills[i]
+          }));
+
+  # ===== 第四行：阶梯进度 + 账单明细 =====
+  - type: entities
+    title: 阶梯进度
+    entities:
+      - entity: sensor.wenzhou_water_{card_id}_当前阶梯
+        name: 当前阶梯
+      - entity: sensor.wenzhou_water_{card_id}_阶梯剩余量
+        name: 本阶剩余
+      - entity: sensor.wenzhou_water_{card_id}_本期一阶用水量
+        name: 一阶用量
+      - entity: sensor.wenzhou_water_{card_id}_本期二阶用水量
+        name: 二阶用量
+      - entity: sensor.wenzhou_water_{card_id}_本期三阶用水量
+        name: 三阶用量
+
+  # ===== 第五行：预警与提示 =====
+  - type: entities
+    title: 预警
+    entities:
+      - entity: sensor.wenzhou_water_{card_id}_账户预警
+        name: 账户预警
+      - entity: sensor.wenzhou_water_{card_id}_距截止天数
+        name: 距截止天数
+      - entity: sensor.wenzhou_water_{card_id}_预估本月账单
+        name: 预估账单
+      - entity: sensor.wenzhou_water_{card_id}_预估本月用水量
+        name: 预估用水量
+
+  # ===== 最后：系统状态 =====
+  - type: entities
+    title: 系统
+    entities:
+      - entity: sensor.wenzhou_water_{card_id}_集成状态
+        name: 集成状态
+      - entity: sensor.wenzhou_water_{card_id}_最后更新时间
+        name: 最后更新
+      - entity: sensor.wenzhou_water_{card_id}_用水地址
+        name: 用水地址

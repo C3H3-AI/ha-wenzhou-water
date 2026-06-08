@@ -1,0 +1,118 @@
+# 温州水务 — 用水量 & 账单按月对比图
+# 使用 apexcharts-card（HACS 安装：https://github.com/RomRider/apexcharts-card）
+# 将 {card_id} 替换为你的水表卡 ID（配置流程中选择的水表编号）
+
+type: custom:apexcharts-card
+graph_span: 12m
+header:
+  show: true
+  title: 温州水务 · 月度用水趋势
+  show_states: true
+  colorize_states: true
+now:
+  show: true
+  label: 本月
+span:
+  start: month
+series:
+  - entity: sensor.wenzhou_water_{card_id}_本期用水量
+    name: 本月用水
+    type: column
+    color: "#2196F3"
+    group_by:
+      func: last
+      duration: 1month
+    stroke_width: 2
+    show:
+      legend_value: true
+      datalabels: true
+    data_generator: |
+      return entity.attributes.history_months.map((month, i) => {
+        return [new Date(month.substring(0,4), month.substring(4,6)-1, 1).getTime(), entity.attributes.history_usages[i]];
+      });
+  - entity: sensor.wenzhou_water_{card_id}_上月用水量
+    name: 上月用水
+    type: line
+    color: "#90CAF9"
+    stroke_width: 2
+    opacity: 0.6
+    show:
+      legend_value: true
+    extend_to: now
+  - entity: sensor.wenzhou_water_{card_id}_历史月均用水
+    name: 月均用水
+    type: line
+    color: "#FF9800"
+    stroke_width: 2
+    opacity: 0.7
+    show:
+      legend_value: true
+    extend_to: now
+
+---
+
+# 用水量环比变化（饼图/柱状图）
+type: custom:apexcharts-card
+graph_span: 12m
+header:
+  show: true
+  title: 用水环比对比
+  show_states: false
+span:
+  start: month
+series:
+  - entity: sensor.wenzhou_water_{card_id}_本期用水量
+    name: 本月用水量 (m³)
+    type: column
+    color: "#2196F3"
+    group_by:
+      func: last
+      duration: 1month
+    show:
+      legend_value: true
+      datalabels: true
+    data_generator: |
+      return entity.attributes.history_months.map((month, i) => {
+        return [new Date(month.substring(0,4), month.substring(4,6)-1, 1).getTime(), entity.attributes.history_usages[i]];
+      });
+
+---
+
+# 账单金额按月对比
+type: custom:apexcharts-card
+graph_span: 12m
+header:
+  show: true
+  title: 温州水务 · 月度账单趋势
+  show_states: true
+  colorize_states: true
+now:
+  show: true
+  label: 本月
+span:
+  start: month
+series:
+  - entity: sensor.wenzhou_water_{card_id}_账单金额
+    name: 本月账单
+    type: column
+    color: "#4CAF50"
+    group_by:
+      func: last
+      duration: 1month
+    stroke_width: 2
+    show:
+      legend_value: true
+      datalabels: true
+    data_generator: |
+      return entity.attributes.history_months.map((month, i) => {
+        return [new Date(month.substring(0,4), month.substring(4,6)-1, 1).getTime(), entity.attributes.history_bills[i]];
+      });
+  - entity: sensor.wenzhou_water_{card_id}_上月账单金额
+    name: 上月账单
+    type: line
+    color: "#A5D6A7"
+    stroke_width: 2
+    opacity: 0.6
+    show:
+      legend_value: true
+    extend_to: now

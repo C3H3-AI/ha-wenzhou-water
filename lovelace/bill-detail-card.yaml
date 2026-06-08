@@ -1,0 +1,48 @@
+# 温州水务 — 本期账单详情 Card
+# 使用 markdown 卡片类型（HA 内置，无需安装额外 HACS 卡片）
+# 将 {card_id} 替换为你的水表卡 ID
+
+type: markdown
+title: 温州水务 · 本期账单详情
+content: |
+  ## 📋 {{ states('sensor.wenzhou_water_{card_id}_用水地址') }}
+
+  | 项目 | 数值 |
+  |------|------|
+  | **账单周期** | {{ state_attr('sensor.wenzhou_water_{card_id}_本期用水量', 'billing_month') or '待更新' }} |
+  | **抄表日期** | {{ states('sensor.wenzhou_water_{card_id}_上期抄表日期') }} — {{ states('sensor.wenzhou_water_{card_id}_本期抄表日期') }} |
+  | **上期读数** | {{ states('sensor.wenzhou_water_{card_id}_上期读数') }} m³ |
+  | **本期读数** | {{ states('sensor.wenzhou_water_{card_id}_本期读数') }} m³ |
+
+  ---
+
+  ### 💧 用水量明细
+
+  | 阶梯 | 用量 (m³) | 单价 (¥/m³) | 金额 (¥) |
+  |------|-----------|-------------|----------|
+  | 一阶 | {{ states('sensor.wenzhou_water_{card_id}_本期一阶用水量') }} | {{ states('sensor.wenzhou_water_{card_id}_一阶水价') }} | {{ state_attr('sensor.wenzhou_water_{card_id}_账单金额', 'step1_amount') }} |
+  | 二阶 | {{ states('sensor.wenzhou_water_{card_id}_本期二阶用水量') }} | {{ states('sensor.wenzhou_water_{card_id}_二阶水价') }} | {{ state_attr('sensor.wenzhou_water_{card_id}_账单金额', 'step2_amount') }} |
+  | 三阶 | {{ states('sensor.wenzhou_water_{card_id}_本期三阶用水量') }} | {{ states('sensor.wenzhou_water_{card_id}_三阶水价') }} | {{ state_attr('sensor.wenzhou_water_{card_id}_账单金额', 'step3_amount') }} |
+  | 污水 | {{ states('sensor.wenzhou_water_{card_id}_本期用水量') }} | {{ states('sensor.wenzhou_water_{card_id}_污水处理费') }} | {{ state_attr('sensor.wenzhou_water_{card_id}_账单金额', 'sewage_amount') }} |
+
+  ---
+
+  ### 🧾 费用汇总
+
+  | 项目 | 金额 |
+  |------|------|
+  | **本期账单合计** | **¥{{ states('sensor.wenzhou_water_{card_id}_账单金额') }}** |
+  | 账户余额 | ¥{{ states('sensor.wenzhou_water_{card_id}_账户余额') }} |
+  | 缴费截止日 | {{ states('sensor.wenzhou_water_{card_id}_缴费截止日期') }} |
+  | 距截止天数 | {{ states('sensor.wenzhou_water_{card_id}_距截止天数') }} 天 |
+
+  ---
+
+  ### 📊 环比与预警
+
+  | 指标 | 本月 | 上月 | 环比 |
+  |------|------|------|------|
+  | 用水量 | {{ states('sensor.wenzhou_water_{card_id}_本期用水量') }} m³ | {{ states('sensor.wenzhou_water_{card_id}_上月用水量') }} m³ | {{ states('sensor.wenzhou_water_{card_id}_用水环比变化') }}% |
+  | 账单 | ¥{{ states('sensor.wenzhou_water_{card_id}_账单金额') }} | ¥{{ states('sensor.wenzhou_water_{card_id}_上月账单金额') }} | {{ states('sensor.wenzhou_water_{card_id}_账单环比变化') }}% |
+
+  > ⚠️ {{ states('sensor.wenzhou_water_{card_id}_账户预警') }}

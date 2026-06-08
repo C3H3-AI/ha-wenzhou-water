@@ -1,0 +1,30 @@
+# 温州水务 — 能源仪表盘接入配置
+# Home Assistant 能源仪表盘配置片段
+# 位置：Configuration > Dashboards > Energy > 编辑仪表盘
+# 或通过 configuration.yaml 添加
+
+# ===== 方式一：通过 configuration.yaml 配置 =====
+# 将以下内容添加到 configuration.yaml 中
+homeassistant:
+  energy:
+    # 水资源（水表）
+    water_sources:
+      - name: 温州水务
+        statistic: sensor.wenzhou_water_{card_id}_本期用水量
+        cost_statistic: sensor.wenzhou_water_{card_id}_账单金额
+
+# ===== 方式二：通过 UI 设置 =====
+# 1. 进入 "配置" → "仪表盘" → "能源"
+# 2. 点击右上角菜单 → "编辑仪表盘"
+# 3. 在"水资源"部分点击"添加水表"
+# 4. 选择 sensor.wenzhou_water_{card_id}_本期用水量（用水量）
+# 5. 选择 sensor.wenzhou_water_{card_id}_账单金额（费用）
+# 6. 保存
+
+# ===== 能源仪表盘会自动展示 =====
+# - 月度用水量柱状图
+# - 月度水费趋势
+# - 本年累计用水/费用
+# - 与去年同期对比
+# 注意：账户余额 / 距截止天数 / 阶梯进度等额外信息
+# 需要使用下方"综合总览卡片"展示
