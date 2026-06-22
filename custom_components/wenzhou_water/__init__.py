@@ -1,11 +1,12 @@
-"""温州水务Home Assistant集成 - v3.1.1
+"""温州水务Home Assistant集成 - v4.0.0
 
-v3.1.1: 重构
-  - 初始页面直接显示二维码
-  - 短信登录放在二维码下方
-  - 自动刷新二维码
-  - 初始日期改为7日
+v4.0.0: 能源面板支持
+  - 新增水表历史累计传感器
+  - 新增累计水费传感器
+  - 历史数据自动注入统计表（sqlite3直写）
+  - 启动时自动注入 + 按钮触发
 """
+import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -19,19 +20,26 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """通过 configuration.yaml 配置的方式（可选兼容）"""
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """设置集成入口"""
     hass.data.setdefault(DOMAIN, {})
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    async def async_auto_inject():
+        await asyncio.sleep(10)
+        try:
+            from .sensor import _import_water_history_to_statistics
+            await _import_water_history_to_statistics(hass, entry)
+        except Exception as e:
+            _LOGGER.warning("自动注入水表历史统计失败（可按钮补救）: %s", e)
+
+    hass.async_create_task(async_auto_inject())
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """卸载集成"""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data.pop(DOMAIN, None)
@@ -39,13 +47,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """处理 config entry 版本迁移
-
-    v1 → v2: 添加 scan_interval / scan_interval_unit
-    v2 → v3: 添加 meter_cards（多水表单条记录）
-    v3 → v4: 纯短信登录，三步流程
-    v4 → v5: 添加 login_type 字段 + 微信扫码登录支持
-    """
     _LOGGER.info(f"温州水务: 迁移 config entry 从 version {config_entry.version}")
 
     new_data = {**config_entry.data}
@@ -72,7 +73,6 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         _LOGGER.info("温州水务: v2→v3 迁移完成")
 
     if config_entry.version in (3, 4):
-        # v4 → v5: 添加 login_type 字段（如果不存在）
         if "login_type" not in new_data:
             new_data["login_type"] = "sms"
         hass.config_entries.async_update_entry(config_entry, data=new_data, version=5)
@@ -82,9 +82,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
 
 async def async_token_expired_notification(hass: HomeAssistant, entry_id: str) -> None:
-    """Token过期通知 - 提醒用户重新登录"""
     try:
-        from homeassistant.exceptions import HomeAssistantError
         await hass.services.async_call(
             "persistent_notification",
             "create",

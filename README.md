@@ -1,6 +1,6 @@
 # 温州水务 - Home Assistant 集成
 
-![Version](https://img.shields.io/badge/version-v3.1.1-blue)
+![Version](https://img.shields.io/badge/version-v4.0.1-blue)
 ![HA Version](https://img.shields.io/badge/Home%20Assistant-2026.4%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -68,6 +68,11 @@ title: 温州水务
 - **问题反馈**：https://github.com/C3H3-AI/ha-wenzhou-water/issues
 
 ## 更新日志
+
+### v4.0.1 (2026-06-23)
+- 🐛 **修复能源面板负数问题** — 账单未出时累计值保持上次值，不跌为0
+- 🐛 **修复数据库统计记录** — 清理 sum=0 的垃圾统计记录
+- ✨ **历史数据扩展** — 从12个月扩展到24个月
 
 ### v3.1.0
 - ✨ 微信扫码登录 UI 优化

@@ -2,7 +2,7 @@
 
 提供按钮实体用于手动触发操作：
 1. 刷新数据 - 立即刷新所有传感器数据
-2. 抓取历史 - 从API批量抓取历史账单
+2. 抓取历史 - 从API批量抓取历史账单并注入统计
 """
 
 import logging
@@ -98,7 +98,7 @@ class FetchWaterHistoryButton(ButtonEntity):
         }
 
     async def async_press(self) -> None:
-        """按钮按下时触发 - 批量抓取历史账单"""
+        """按钮按下时触发 - 批量抓取历史账单并注入统计"""
         _LOGGER.info("用户触发: 抓取历史账单")
 
         if not self._coordinator:
@@ -112,21 +112,24 @@ class FetchWaterHistoryButton(ButtonEntity):
         try:
             total_fetched = 0
             for card_id in self._coordinator.card_ids:
-                # 重置初始化标志，强制重新抓取
                 self._coordinator._history_init_flags[card_id] = False
                 _LOGGER.info(f"  开始抓取 {card_id} 的历史账单...")
-
-                # 触发批量初始化（内部调用 _init_billing_history_from_api）
                 history = await self._coordinator._init_billing_history_from_api(card_id)
                 total_fetched += len(history) if history else 0
-                _LOGGER.info(f"  {card_id} 历史账单抓取完成: {len(history) if history else 0} 条")
 
             _LOGGER.info(f"历史账单抓取完成: 共 {total_fetched} 条")
+
+            # 注入历史统计到 recorder 数据库（能源面板用）
+            try:
+                from .sensor import _import_water_history_to_statistics
+                await _import_water_history_to_statistics(self.hass, self.config_entry)
+                _LOGGER.info("历史累计统计注入完成")
+            except Exception as e:
+                _LOGGER.warning("历史累计统计注入失败: %s", e)
 
             # 触发数据刷新
             await self._coordinator.async_request_refresh()
 
-            # 通知前端
             self.hass.bus.async_fire("wenzhou_water_history_fetched", {
                 "config_entry_id": self.config_entry.entry_id,
                 "total_fetched": total_fetched,

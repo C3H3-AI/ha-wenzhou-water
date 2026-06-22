@@ -292,6 +292,21 @@ SENSOR_TYPES = {
         "icon": "mdi:clock-next",
         "unit": None,
     },
+    # 能源面板专用
+    "water_history_cumulative": {
+        "name": "水表历史累计",
+        "icon": "mdi:water",
+        "unit": "m³",
+        "device_class": "water",
+        "state_class": "total_increasing",
+    },
+    "total_water_cost": {
+        "name": "累计水费",
+        "icon": "mdi:cash-multiple",
+        "unit": "¥",
+        "device_class": "monetary",
+        "state_class": "total",
+    },
 }
 
 
@@ -528,9 +543,9 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 }
                 existing_history.append(record)
 
-            # 只保留最近12个月
+            # 只保留最近24个月
             existing_history.sort(key=lambda x: x.get("billing_month", ""), reverse=True)
-            trimmed = existing_history[:12]
+            trimmed = existing_history[:24]
 
             store = self._get_history_store(card_id)
             if store is None:
@@ -737,6 +752,7 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 card_error_count += 1
 
             # 3. 获取账单（补充其他数据）
+            bills = []
             try:
                 bills = await self.api.get_bills(card_id)
                 if bills and len(bills) > 0:
@@ -829,6 +845,15 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             except Exception as e:
                 _LOGGER.error(f"获取最新抄表数据失败（{card_id}）: {e}")
                 card_error_count += 1
+
+            # ========== 负数修复：本月账单未出时用水量为0，用最近非零账单值替换 ==========
+            if card_result.get("water_used", 0) == 0 and bills and len(bills) > 1:
+                for b in bills[1:]:
+                    prev_wu = float(b.get("readWater", 0) or 0)
+                    if prev_wu > 0:
+                        card_result["water_used"] = prev_wu
+                        _LOGGER.debug("本月账单未出，用水量使用上期值: %s → %s m³", card_id, prev_wu)
+                        break
 
             # 判断单个水表状态
             if token_expired:
@@ -984,6 +1009,33 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 card_result["history_avg_usage"] = current_usage
                 card_result["usage_vs_avg"] = 0
 
+            # 计算历史累计值（从完整历史数据计算，不限于12个月）
+            all_history_raw = await self._load_billing_history(card_id)
+            if not all_history_raw or len(all_history_raw) < 2:
+                all_history_raw = history
+            if all_history_raw and len(all_history_raw) >= 2:
+                all_history_raw.sort(key=lambda x: x.get("billing_month", ""))
+                cumul = 0.0
+                cumul_cost = 0.0
+                for h in all_history_raw:
+                    cumul += float(h.get("water_used", 0) or 0)
+                    cumul_cost += float(h.get("bill_amount", 0) or 0)
+                card_result["water_history_cumulative"] = round(cumul, 1)
+                card_result["total_water_cost"] = round(cumul_cost, 2)
+            else:
+                card_result["water_history_cumulative"] = current_usage
+                card_result["total_water_cost"] = card_result.get("bill_amount", 0)
+
+            # 负数修复：本月账单未出，累计值保持上次值（能源面板防负）
+            if self.data and card_id in self.data:
+                prev = self.data[card_id]
+                if card_result.get("water_history_cumulative", 0) <= 0 and prev.get("water_history_cumulative", 0) > 0:
+                    card_result["water_history_cumulative"] = prev["water_history_cumulative"]
+                    _LOGGER.info("本月账单未出，水表历史累计保持上次值: %s → %s m³", card_id, prev["water_history_cumulative"])
+                if card_result.get("total_water_cost", 0) <= 0 and prev.get("total_water_cost", 0) > 0:
+                    card_result["total_water_cost"] = prev["total_water_cost"]
+                    _LOGGER.info("本月账单未出，累计水费保持上次值: %s → ¥%s", card_id, prev["total_water_cost"])
+
         # 设置最后更新时间和下次轮询时间（所有水表统一）
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         next_poll = _compute_next_monthly_run(self.day_of_month)
@@ -1138,3 +1190,121 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
         await super().async_added_to_hass()
         if self.coordinator.data is not None:
             self.async_write_ha_state()
+
+
+async def _import_water_history_to_statistics(hass, entry):
+    """通过 sqlite3 写入历史累计统计到 recorder 数据库（能源面板用）"""
+    import sqlite3
+    from datetime import datetime, timezone
+    import time as time_mod
+    import json
+    import glob as glob_mod
+
+    entry_id = entry.entry_id
+    card_ids = entry.data.get("meter_cards", [])
+    if not card_ids:
+        card_id = entry.data.get("meter_card_id")
+        if card_id:
+            card_ids = [{"cardId": card_id, "cardName": entry.data.get("meter_card_name", "未知")}]
+        else:
+            return
+
+    for card_info in card_ids:
+        cid = card_info.get("cardId") if isinstance(card_info, dict) else card_info
+        if not cid:
+            continue
+
+        storage_key = f"wenzhou_water_history_{cid}"
+        store_path = hass.config.path(".storage", storage_key)
+
+        try:
+            with open(store_path) as f:
+                d = json.load(f)
+            history = d.get("data") if isinstance(d, dict) else d
+            if not isinstance(history, list):
+                history = d
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+
+        if not isinstance(history, list) or len(history) < 2:
+            continue
+
+        history.sort(key=lambda b: b.get("water_used", 0) > 0)
+        history.sort(key=lambda b: str(b.get("billing_month", "")))
+
+        stats_data = []
+        cumulative = 0.0
+        cumulative_cost = 0.0
+        for bill in history:
+            bm = str(bill.get("billing_month", "") or "")
+            if len(bm) != 6:
+                continue
+            year, month = int(bm[:4]), int(bm[4:6])
+            if year < 2020 or year > 2030 or month < 1 or month > 12:
+                continue
+            water_used = float(bill.get("water_used", 0) or 0)
+            bill_amt = float(bill.get("bill_amount", 0) or 0)
+            cumulative += water_used
+            cumulative_cost += bill_amt
+            start_ts = datetime(year, month, 1, tzinfo=timezone.utc).timestamp()
+            stats_data.append((start_ts, cumulative, cumulative_cost))
+
+        if not stats_data:
+            continue
+
+        db_path = hass.config.path("home-assistant_v2.db")
+        now = time_mod.time()
+
+        entity_ids = [
+            f"sensor.wenzhou_water_{cid}_water_history_cumulative",
+            f"sensor.wenzhou_water_{cid}_total_water_cost",
+        ]
+
+        def _do_inject():
+            conn = None
+            try:
+                conn = sqlite3.connect(db_path, timeout=10)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("BEGIN IMMEDIATE")
+
+                for eid in entity_ids:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO statistics_meta "
+                        "(statistic_id, source, unit_of_measurement, has_mean, has_sum, name) "
+                        "VALUES (?, ?, ?, 0, 1, '水表历史累计')",
+                        (eid, DOMAIN, "m³"),
+                    )
+                    row = conn.execute(
+                        "SELECT id FROM statistics_meta WHERE statistic_id = ?", (eid,)
+                    ).fetchone()
+                    if row:
+                        conn.execute("DELETE FROM statistics WHERE metadata_id = ?", (row[0],))
+
+                for ts, val, cost in stats_data:
+                    for idx, idx_val in enumerate([val, cost]):
+                        row = conn.execute(
+                            "SELECT id FROM statistics_meta WHERE statistic_id = ?",
+                            (entity_ids[idx],),
+                        ).fetchone()
+                        if row:
+                            conn.execute(
+                                "INSERT INTO statistics (metadata_id, start_ts, state, sum, min, max, mean, last_reset_ts, created_ts) "
+                                "VALUES (?, ?, ?, ?, ?, ?, 0.0, ?, ?)",
+                                (row[0], ts, idx_val, idx_val, idx_val, idx_val, ts, now),
+                            )
+
+                conn.commit()
+                _LOGGER.info("已注入 %d 条水表历史统计到 %s（%s）", len(stats_data), cid, entity_ids)
+            except sqlite3.Error as e:
+                _LOGGER.error("SQLite 写入水表历史累计失败: %s", e)
+                if conn:
+                    conn.rollback()
+            except Exception as e:
+                _LOGGER.error("注入水表历史累计时发生意外错误: %s", e)
+                if conn:
+                    conn.rollback()
+            finally:
+                if conn:
+                    conn.close()
+
+        await hass.async_add_executor_job(_do_inject)
