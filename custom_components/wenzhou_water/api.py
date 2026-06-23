@@ -22,9 +22,19 @@ TOKEN_EXPIRED_CODES = {401, 10001, 10002, 10003, 10401}
 class WenzhouWaterAPI:
     """温州水务API客户端（需Token初始化）"""
 
-    # API 支持的最早账单月份
-    # 实测验证：API 返回数据最早为 202406（2024年6月），连续25个月无断档
-    EARLIEST_BILLING_MONTH = "202406"  # 2024年6月
+    @classmethod
+    def get_earliest_billing_month(cls) -> str:
+        """获取API支持的最早账单月份（当前月 - 2年滑动窗口）
+
+        实测验证：2024年6月时 API 返回数据最早为 202406，刚好2年
+        """
+        now = datetime.now()
+        year = now.year
+        month = now.month - 24
+        while month <= 0:
+            month += 12
+            year -= 1
+        return f"{year}{month:02d}"
 
     def __init__(self, access_token: str):
         self.access_token = access_token
@@ -136,11 +146,11 @@ class WenzhouWaterAPI:
 
         if start_month:
             # 确保不早于最早可抓取月份
-            if start_month < self.EARLIEST_BILLING_MONTH:
-                start_month = self.EARLIEST_BILLING_MONTH
+            if start_month < self.get_earliest_billing_month():
+                start_month = self.get_earliest_billing_month()
         else:
-            # 默认从最早可抓取月份开始（2024年3月）
-            start_month = self.EARLIEST_BILLING_MONTH
+            # 默认从最早可抓取月份开始（当前月 - 2年）
+            start_month = self.get_earliest_billing_month()
 
         return await self._request("GET", f"/meter-card/{card_id}/bills?startBM={start_month}&endBM={end_month}")
 
