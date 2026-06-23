@@ -1269,6 +1269,24 @@ async def _import_water_history_to_statistics(hass, entry):
         if not stats_data:
             continue
 
+        # 补充缺失月份数据点：最新偏移后的月份到当前月之间可能有 gap
+        # 例: 5月账单(用水4月)是4月1日, 当前6月→缺5月/6月的数据点
+        # 能源面板看到缺口会算出负值, 用相同累计值补齐避免负数
+        last_ts = stats_data[-1][0]
+        now_dt = datetime.now()
+        # 从最新数据点的下个月开始, 逐月补到当前月
+        last_dt = datetime.fromtimestamp(last_ts, tz=timezone.utc)
+        fill_year, fill_month = last_dt.year, last_dt.month
+        while True:
+            fill_month += 1
+            if fill_month > 12:
+                fill_month = 1
+                fill_year += 1
+            if fill_year > now_dt.year or (fill_year == now_dt.year and fill_month > now_dt.month):
+                break
+            fill_ts = datetime(fill_year, fill_month, 1, tzinfo=timezone.utc).timestamp()
+            stats_data.append((fill_ts, cumulative, cumulative_cost))
+
         db_path = hass.config.path("home-assistant_v2.db")
         now = time_mod.time()
 
