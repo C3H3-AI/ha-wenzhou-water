@@ -1,4 +1,7 @@
-"""温州水务传感器 - v3.0.1
+"""温州水务传感器 - v4.0.2
+v4.0.2:
+  - 账单月份偏移修正：月初出账改为实际用水月份（billingMonth - 1）
+  - RestoreEntity 修复：重启后不再生成 sum=0 统计记录
 v3.0.1:
   - 文档同步更新
 v3.0.0:
@@ -53,6 +56,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
+from homeassistant.helpers.restore_state import RestoreEntity
 
 try:
     from homeassistant.components.sensor import SensorEntity
@@ -543,14 +547,13 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 }
                 existing_history.append(record)
 
-            # 只保留最近24个月
+            # 保留全部历史（由 API 的最早月份限制自动控制）
             existing_history.sort(key=lambda x: x.get("billing_month", ""), reverse=True)
-            trimmed = existing_history[:24]
 
             store = self._get_history_store(card_id)
             if store is None:
                 return
-            await store.async_save(trimmed)
+            await store.async_save(existing_history)
         except Exception as e:
             _LOGGER.error(f"保存历史记录失败（{card_id}）: {e}")
 
@@ -625,8 +628,8 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 unique.append(h)
         unique.sort(key=lambda x: x.get("billing_month", ""), reverse=True)
 
-        # 只保留最近12个月
-        result = unique[:12]
+        # 保留全部历史（由 API 的 EARLIEST_BILLING_MONTH 自动控制上限）
+        result = unique
         _LOGGER.info(f"  历史账单初始化完成，共 {len(result)} 条（失败 {fetch_errors} 批次）")
 
         # 保存到 Storage
@@ -1051,7 +1054,7 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
         return result
 
 
-class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
+class WenzhouWaterSensor(RestoreEntity, CoordinatorEntity, SensorEntity):
     """温州水务传感器 - 继承 SensorEntity + CoordinatorEntity，支持多水表"""
 
     def __init__(self, coordinator: WenzhouWaterDataUpdateCoordinator, entry: ConfigEntry,
@@ -1063,6 +1066,7 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
         self.card_id = card_id
         self.card_name = card_name
         self._attr_has_entity_name = True
+        self._restored_state = None
 
         # 从 SENSOR_TYPES 读取 state_class / device_class（支持能源仪表盘）
         sensor_cfg = SENSOR_TYPES.get(sensor_id, {})
@@ -1092,7 +1096,7 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """返回传感器状态值（从对应 card_id 的数据中取）"""
         if not self.coordinator.data:
-            return None
+            return self._restored_state
         card_data = self.coordinator.data.get(self.card_id, {})
         value = card_data.get(self.sensor_id)
 
@@ -1186,9 +1190,15 @@ class WenzhouWaterSensor(CoordinatorEntity, SensorEntity):
         return True
 
     async def async_added_to_hass(self):
-        """添加到 Home Assistant - 避免初始 unknown"""
+        """添加到 Home Assistant - 恢复上次状态避免 unknown 间隙"""
         await super().async_added_to_hass()
-        if self.coordinator.data is not None:
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (None, "unknown", "unavailable"):
+            try:
+                self._restored_state = float(last_state.state)
+            except (ValueError, TypeError):
+                self._restored_state = last_state.state
+        if self.coordinator.data is not None or self._restored_state is not None:
             self.async_write_ha_state()
 
 
@@ -1242,6 +1252,11 @@ async def _import_water_history_to_statistics(hass, entry):
             year, month = int(bm[:4]), int(bm[4:6])
             if year < 2020 or year > 2030 or month < 1 or month > 12:
                 continue
+            # 水务月初出账，账单月份=实际用水月份+1
+            month -= 1
+            if month == 0:
+                month = 12
+                year -= 1
             water_used = float(bill.get("water_used", 0) or 0)
             bill_amt = float(bill.get("bill_amount", 0) or 0)
             cumulative += water_used
