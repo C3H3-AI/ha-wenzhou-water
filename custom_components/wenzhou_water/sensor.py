@@ -2,6 +2,7 @@
 v4.0.2:
   - 账单月份偏移修正：月初出账改为实际用水月份（billingMonth - 1）
   - RestoreEntity 修复：重启后不再生成 sum=0 统计记录
+  - 修复 EARLIEST_BILLING_MONTH 为 202406（实测验证，原 202403 错误）
 v3.0.1:
   - 文档同步更新
 v3.0.0:
@@ -567,7 +568,7 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
 
         now = datetime.now()
         end_month = now.strftime("%Y%m")
-        earliest = WenzhouWaterAPI.EARLIEST_BILLING_MONTH  # "202403"
+        earliest = WenzhouWaterAPI.EARLIEST_BILLING_MONTH  # "202406" (实测验证)
 
         _LOGGER.info(f"温州水务：开始初始化历史账单（{card_id}），范围 {earliest} - {end_month}")
 

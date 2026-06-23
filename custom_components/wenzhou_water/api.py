@@ -23,7 +23,8 @@ class WenzhouWaterAPI:
     """温州水务API客户端（需Token初始化）"""
 
     # API 支持的最早账单月份
-    EARLIEST_BILLING_MONTH = "202403"  # 2024年3月
+    # 实测验证：API 返回数据最早为 202406（2024年6月），连续25个月无断档
+    EARLIEST_BILLING_MONTH = "202406"  # 2024年6月
 
     def __init__(self, access_token: str):
         self.access_token = access_token
