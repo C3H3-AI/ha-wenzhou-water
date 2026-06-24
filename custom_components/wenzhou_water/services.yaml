@@ -1,0 +1,18 @@
+refresh_history:
+  name: 刷新历史统计数据
+  description: 删除指定月份范围的历史统计并重新注入（从已缓存的历史账单数据重建）
+  fields:
+    start_month:
+      name: 起始月份
+      description: "要刷新的起始月份，格式 YYYYMM，例如 202501。不填则从最早月份开始。"
+      example: "202501"
+      required: false
+      selector:
+        text:
+    end_month:
+      name: 结束月份
+      description: "要刷新的结束月份，格式 YYYYMM，例如 202506。不填则到最新月份为止。"
+      example: "202506"
+      required: false
+      selector:
+        text:

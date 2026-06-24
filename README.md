@@ -1,6 +1,6 @@
 # 温州水务 - Home Assistant 集成
 
-![Version](https://img.shields.io/badge/version-v4.0.3-blue)
+![Version](https://img.shields.io/badge/version-v4.1.0-blue)
 ![HA Version](https://img.shields.io/badge/Home%20Assistant-2026.4%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -68,6 +68,17 @@ title: 温州水务
 - **问题反馈**：https://github.com/C3H3-AI/ha-wenzhou-water/issues
 
 ## 更新日志
+
+### v4.1.0 (2026-06-24)
+- 🔧 **统计数据修复** — SQLite 注入改用 `source=recorder`，与 HA Recorder 共享同一套统计基线
+- 🔧 **当月初始值** — gap-fill 补齐到当前月，确保 Recorder 月聚合有正确基线
+- 🔧 **当前月 sum 修正** — 自动修正被 short_term 覆盖的 sum=0 为正确累计值
+- ✨ **集成状态中文翻译** — `native_value` 直接返回中文（正常/密钥过期/API错误/网络异常）
+- ✨ **错误通知** — api_error/network_error 时推送 persistent_notification
+
+### v4.0.3 (2026-06-24)
+- 🐛 **native_value 保护** — 累计传感器永不返回 0，API 失败时使用 `_restored_state`/`__restore_cache` 兜底
+- ✨ **燃气集成修复同步** — 相同兜底逻辑应用到 `ha-crcgas`
 
 ### v4.0.2 (2026-06-23)
 - 🐛 **账单月份偏移修正** — 月初出账的水务账单，统计记录映射到实际用水月份（billingMonth - 1）

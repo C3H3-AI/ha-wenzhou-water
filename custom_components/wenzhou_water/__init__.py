@@ -25,8 +25,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # 先安排注入任务，不等待传感器平台完成
     async def async_auto_inject():
         await asyncio.sleep(10)
         try:
@@ -36,6 +36,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("自动注入水表历史统计失败（可按钮补救）: %s", e)
 
     hass.async_create_task(async_auto_inject())
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # 注册服务：手动刷新历史统计数据
+    async def handle_refresh_history(call):
+        _LOGGER.info("用户触发: 刷新历史统计数据")
+        try:
+            from .sensor import _import_water_history_to_statistics
+            await _import_water_history_to_statistics(hass, entry)
+            _LOGGER.info("历史统计数据刷新完成")
+        except Exception as e:
+            _LOGGER.error("刷新历史统计数据失败: %s", e)
+
+    hass.services.async_register(DOMAIN, "refresh_history", handle_refresh_history)
+
     return True
 
 
@@ -100,3 +115,21 @@ async def async_token_expired_notification(hass: HomeAssistant, entry_id: str) -
     _LOGGER.error(
         f"温州水务登录已过期（配置项ID: {entry_id}），请重新配置"
     )
+
+
+async def async_error_notification(hass: HomeAssistant, entry_id: str, error_details: str) -> None:
+    """发送集成错误通知（API错误/网络错误）"""
+    try:
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "⚠️ 温州水务接口异常",
+                "message": f"温州水务集成检测到以下问题：\n\n{error_details}\n\n可能的原因：\n- 水务API服务临时不可用\n- 网络连接异常\n- Token已过期\n\n集成将在1小时后自动重试。\n\n如果问题持续存在，请尝试[重新配置](config/config_entries/config_flow?config_flow=wenzhou_water)集成。",
+                "notification_id": f"wenzhou_water_error_{entry_id}",
+            },
+            blocking=True,
+        )
+        _LOGGER.warning("温州水务: 错误通知已发送\n%s", error_details)
+    except Exception as e:
+        _LOGGER.warning(f"温州水务: 发送错误通知失败: {e}")
