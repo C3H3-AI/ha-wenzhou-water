@@ -51,15 +51,26 @@
 - 水表信息（地址、营业厅、水价类型）
 - 按钮（刷新数据、获取历史）
 
-## 仪表盘卡片
+### 用水统计卡片
 
-推荐使用 [统一账单卡片](https://github.com/C3H3-AI/ha-utility-bill-card)：
+v4.2.0 提供专用 Lovelace 卡片，双年对比、阶梯进度、悬浮提示。
 
-```yaml
-type: custom:ha-utility-bill-card
-entity: sensor.wenzhou_water_账户余额
-title: 温州水务
-```
+**添加：**
+1. 设置 → 仪表盘 → 资源 → 添加资源
+2. URL: `/local/community/water-statistics-card/water-statistics-card.js`
+3. 类型: JavaScript 模块
+4. 编辑仪表盘 → + 添加卡片 → 搜索「温州水务统计」
+5. 在配置界面选择账户（倪*禾/倪*州）
+
+**功能：**
+- 📊 双年对比折线/柱状图（m³ / ¥ 切换）
+- 🖱️ 鼠标悬停浮标查看月度详情（当年 + 去年同期）
+- 📈 Y 轴整数标注，全年 12 月显示
+- 🏗️ 一阶阶梯进度条（年度限额对比）
+- 🔄 年份翻页查看历史数据
+- 👤 配置时选择水表账户（支持多水表）
+
+---
 
 ## 故障排除
 
