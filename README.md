@@ -1,6 +1,6 @@
 # 温州水务 - Home Assistant 集成
 
-![Version](https://img.shields.io/badge/version-v4.1.0-blue)
+![Version](https://img.shields.io/badge/version-v4.2.0-blue)
 ![HA Version](https://img.shields.io/badge/Home%20Assistant-2026.4%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
@@ -107,6 +107,13 @@ v4.2.0 提供专用 Lovelace 卡片，双年对比、阶梯进度、悬浮提示
 ### v3.0.0
 - ✨ 新增微信扫码登录
 - ✨ 支持重新配置切换登录方式
+
+### v4.2.0 (2026-06-25)
+- ✨ 新增 `water-statistics-card` 用水对比统计 Lovelace 卡片
+  - 双年对比折线/柱状图，水位量/费用切换
+  - 一阶阶梯进度条，鼠标悬停浮动详情
+  - 配置时选择水表账户（倪*禾/倪*州）
+  - 通过 friendly_name 自动匹配传感器
 
 ### 更早版本
 详见 [GitHub Releases](https://github.com/C3H3-AI/ha-wenzhou-water/releases)
