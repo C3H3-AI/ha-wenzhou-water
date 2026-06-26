@@ -447,8 +447,6 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
         self._history_init_locks = {card_id: asyncio.Lock() for card_id in card_ids}
         # Token过期通知标志：避免重复发送通知
         self._token_expired_notified = False
-        # 通用错误通知标志：避免重复发送错误通知
-        self._error_notified = False
         # Store 实例缓存（避免 HA 2026.4 中 hass.helpers.store 访问方式变化的问题）
         # 在 __init__ 中创建，保存到 hass.data 复用
         self._history_stores: Dict[str, Any] = {}
@@ -558,7 +556,7 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 existing_history.append(record)
 
             # 保留全部历史（由 API 的最早月份限制自动控制）
-            existing_history.sort(key=lambda x: x.get("billing_month", ""), reverse=True)
+            existing_history.sort(key=lambda x: str(x.get("billing_month", "")), reverse=True)
 
             store = self._get_history_store(card_id)
             if store is None:
@@ -636,7 +634,7 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             if bm and bm not in seen:
                 seen.add(bm)
                 unique.append(h)
-        unique.sort(key=lambda x: x.get("billing_month", ""), reverse=True)
+        unique.sort(key=lambda x: str(x.get("billing_month", "")), reverse=True)
 
         # 与已有历史合并：保留旧数据（API 返回的最新 24 个月可能不包含更早的记录）
         existing = await self._load_billing_history(card_id)
@@ -913,24 +911,6 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
                 except Exception as e:
                     _LOGGER.error(f"发送Token过期通知失败: {e}")
 
-        # 非 Token 过期的错误通知（api_error / network_error）
-        if not token_expired and not self._error_notified:
-            error_cards = []
-            for card_id in self.card_ids:
-                status = result[card_id].get("integration_status", "")
-                card_name = result[card_id].get("meter_address", card_id)
-                if status == "api_error":
-                    error_cards.append(f"  - {card_name}：API全部失败，数据停止更新")
-                elif status == "network_error":
-                    error_cards.append(f"  - {card_name}：部分API请求失败，数据可能不完整")
-            if error_cards:
-                self._error_notified = True
-                try:
-                    from . import async_error_notification
-                    await async_error_notification(self.hass, self._entry_id, "\n".join(error_cards))
-                except Exception as e:
-                    _LOGGER.error(f"发送错误通知失败: {e}")
-
         # 计算新增传感器：预估月用水量、账户预警、历史均值
         from datetime import datetime as dt
         today = dt.now()
@@ -1080,7 +1060,7 @@ class WenzhouWaterDataUpdateCoordinator(DataUpdateCoordinator):
             if not all_history_raw or len(all_history_raw) < 2:
                 all_history_raw = history
             if all_history_raw and len(all_history_raw) >= 2:
-                all_history_raw.sort(key=lambda x: x.get("billing_month", ""))
+                all_history_raw.sort(key=lambda x: str(x.get("billing_month", "")))
                 cumul = 0.0
                 cumul_cost = 0.0
                 for h in all_history_raw:
@@ -1207,11 +1187,6 @@ class WenzhouWaterSensor(RestoreEntity, CoordinatorEntity, SensorEntity):
                 return "今天截止"
             else:
                 return value
-
-        # integration_status 返回中文翻译
-        if self.sensor_id == "integration_status":
-            from .const import INTEGRATION_STATUS
-            return INTEGRATION_STATUS.get(str(value), str(value))
 
         if self.sensor_id in ("water_history_cumulative", "total_water_cost"):
             if value is None or value <= 0:
@@ -1473,30 +1448,22 @@ async def _import_water_history_to_statistics(hass, entry):
 
                     changed = False
                     for eid, eunit in entity_data:
-                        # 使用 source=recorder 写入，和 HA Recorder 共享同一套统计数据
                         conn.execute(
                             "INSERT OR IGNORE INTO statistics_meta "
                             "(statistic_id, source, unit_of_measurement, has_mean, has_sum, name) "
-                            "VALUES (?, 'recorder', ?, 0, 1, ?)",
-                            (eid, eunit, "水表历史累计"),
+                            "VALUES (?, ?, ?, 0, 1, ?)",
+                            (eid, DOMAIN, eunit, "水表历史累计"),
                         )
-                        # 清理旧的 source=wenzhou_water 残留数据
-                        old_ids = [
-                            r[0] for r in conn.execute(
-                                "SELECT id FROM statistics_meta WHERE statistic_id = ? AND source = ?",
-                                (eid, DOMAIN),
-                            ).fetchall()
-                        ]
-                        if old_ids:
-                            for old_id in old_ids:
-                                conn.execute("DELETE FROM statistics WHERE metadata_id = ?", (old_id,))
-                                conn.execute("DELETE FROM statistics_meta WHERE id = ?", (old_id,))
-
                         row = conn.execute(
-                            "SELECT id FROM statistics_meta WHERE statistic_id = ? AND source = 'recorder'", (eid,)
+                            "SELECT id FROM statistics_meta WHERE statistic_id = ?", (eid,)
                         ).fetchone()
                         if row is None:
                             continue
+                        # 先清理 HA recorder 可能自动记录的 sum=0 条目，防止干扰变化检测
+                        conn.execute(
+                            "DELETE FROM statistics WHERE metadata_id = ? AND (sum = 0 OR sum IS NULL)",
+                            (row[0],),
+                        )
                         existing_rows = conn.execute(
                             "SELECT start_ts, sum FROM statistics WHERE metadata_id = ? ORDER BY start_ts",
                             (row[0],),
@@ -1526,7 +1493,7 @@ async def _import_water_history_to_statistics(hass, entry):
                     # 数据有变化，全量重写
                     for eid, eunit in entity_data:
                         row = conn.execute(
-                            "SELECT id FROM statistics_meta WHERE statistic_id = ? AND source = 'recorder'", (eid,)
+                            "SELECT id FROM statistics_meta WHERE statistic_id = ?", (eid,)
                         ).fetchone()
                         if row:
                             conn.execute("DELETE FROM statistics WHERE metadata_id = ?", (row[0],))
@@ -1537,7 +1504,7 @@ async def _import_water_history_to_statistics(hass, entry):
                                 continue
                             eid = entity_data[idx][0]
                             row = conn.execute(
-                                "SELECT id FROM statistics_meta WHERE statistic_id = ? AND source = 'recorder'",
+                                "SELECT id FROM statistics_meta WHERE statistic_id = ?",
                                 (eid,),
                             ).fetchone()
                             if row and idx_val > 0:
@@ -1547,22 +1514,22 @@ async def _import_water_history_to_statistics(hass, entry):
                                     (row[0], ts, idx_val, idx_val, idx_val, idx_val, ts, now),
                                 )
 
-                    # 修正当前月可能被 Recorder short_term 写入了 sum=0 的条目
+                    # 修正 Recorder 可能写入的 sum=0 条目为正确累计值
                     latest_cumulative_usage = stats_data[-1][1]
                     latest_cumulative_cost = stats_data[-1][2]
-                    now_dt = datetime.now()
-                    current_month_start = datetime(now_dt.year, now_dt.month, 1, tzinfo=timezone.utc).timestamp()
                     for idx, (eid, eunit) in enumerate(entity_data):
                         row = conn.execute(
-                            "SELECT id FROM statistics_meta WHERE statistic_id = ? AND source = 'recorder'", (eid,)
+                            "SELECT id FROM statistics_meta WHERE statistic_id = ?", (eid,)
                         ).fetchone()
                         if row:
                             correct_sum = latest_cumulative_usage if "cumulative" in eid else latest_cumulative_cost
                             fixed = conn.execute(
                                 "UPDATE statistics SET sum = ?, state = ?, min = ?, max = ? "
-                                "WHERE metadata_id = ? AND start_ts >= ? AND (sum IS NULL OR sum = 0)",
-                                (correct_sum, correct_sum, correct_sum, correct_sum, row[0], current_month_start),
+                                "WHERE metadata_id = ? AND (sum IS NULL OR sum = 0)",
+                                (correct_sum, correct_sum, correct_sum, correct_sum, row[0]),
                             ).rowcount
+                            if fixed > 0:
+                                _LOGGER.info("修正 %s 条 sum=0 为 sum=%s（%s）", fixed, correct_sum, eid)
 
                     conn.commit()
                     _LOGGER.info("SQLite 写入完成（%s）", cid)

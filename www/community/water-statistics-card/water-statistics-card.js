@@ -28,10 +28,10 @@ function _niceStep(maxV) {
 function _makeTipSVG(month, d1, d2, y1, y2, rate, PL, SX, H, W, pos) {
   const sd1 = d1[month], sd2 = d2[month];
   if (!sd1 && !sd2) return '';
-  const g1 = sd1 ? sd1.change.toFixed(1) : '0.0';
-  const g2 = sd2 ? sd2.change.toFixed(1) : '0.0';
-  const c1 = sd1 ? '¥' + (sd1.change * rate).toFixed(0) : '¥0';
-  const c2 = sd2 ? '¥' + (sd2.change * rate).toFixed(0) : '¥0';
+  const g1 = sd1 ? Math.max(0, sd1.change).toFixed(1) : '0.0';
+  const g2 = sd2 ? Math.max(0, sd2.change).toFixed(1) : '0.0';
+  const c1 = sd1 ? '¥' + (Math.max(0, sd1.change) * rate).toFixed(0) : '¥0';
+  const c2 = sd2 ? '¥' + (Math.max(0, sd2.change) * rate).toFixed(0) : '¥0';
   const TW = 100, TH = 44;
   let tx = pos ? Math.max(2, Math.min(W - TW - 2, pos.x - TW / 2)) : 2;
   let ty = pos ? Math.max(2, Math.min(H - TH - 2, pos.y - TH - 8)) : 2;
@@ -379,6 +379,9 @@ class WaterStatisticsCard extends HTMLElement {
     const diff = mode === 'gas' ? y1Total - y2Total : y1Cost - y2Cost;
     const diffColor = diff > 0 ? '#f44336' : diff < 0 ? '#4caf50' : 'var(--secondary-text-color)';
     const diffSym = diff > 0 ? '↑' : diff < 0 ? '↓' : '→';
+    // 从统计数据中找最近有数据的月份（确保和图表的月份一致）
+    const _latestDataMonth = Object.keys(d1).filter(m => Number(m) <= maxMonth && (d1[m]?.change || 0) > 0).map(Number).sort((a,b)=>b-a)[0];
+    const periodLabel = _latestDataMonth !== undefined ? (_latestDataMonth+1)+'月' : (ld.period||'最近一期');
 
     if (!this._selectedAccount) {
       this.innerHTML = `
@@ -432,14 +435,14 @@ class WaterStatisticsCard extends HTMLElement {
 ${this._loading?'<div class="ldg">加载中...</div>':''}
 ${!this._loading?`
 <div class="ha" style="justify-content:center;margin-bottom:6px;gap:8px"><button class="nb" data-action="cy" data-dir="-1">&lsaquo;</button><span class="yt">${this._year}</span><button class="nb" data-action="cy" data-dir="1">&rsaquo;</button></div>
-<div class="cl"><span class="li"><span class="ld" style="background:#2196f3"></span> ${y1}年</span><span class="li"><span class="ld" style="background:#7c4dff"></span> ${y2}年同期</span></div>
+<div class="cl"><span class="li"><span class="ld" style="background:#2196f3"></span> 本年</span><span class="li"><span class="ld" style="background:#7c4dff"></span> 去年同期</span></div>
 <div class="ca">${this._renderChart(y1,y2,mode,this._chartType,this._hoverMonth?this._hoverMonth.month:null,this._hoverPos)}</div>
 <div class="sr">
-<div class="sc"><div class="sv">${mode==='gas'?y1Total.toFixed(1):'¥'+y1Cost.toFixed(0)}</div><div class="sl">${y1}年${mode==='gas'?'用水量':'费用'}</div><div class="sd" style="color:${diffColor}">${diffSym} ${Math.abs(diff).toFixed(mode==='gas'?1:0)}${mode==='gas'?'m³':'元'}</div></div>
-<div class="sc"><div class="sv">${mode==='gas'?y2Total.toFixed(1):'¥'+y2Cost.toFixed(0)}</div><div class="sl">${y2}年同期${mode==='gas'?'用水量':'费用'}</div></div>
+<div class="sc"><div class="sv">${mode==='gas'?y1Total.toFixed(1):'¥'+y1Cost.toFixed(0)}</div><div class="sl">本年${mode==='gas'?'用水量':'费用'}</div><div class="sd" style="color:${diffColor}">${diffSym} ${Math.abs(diff).toFixed(mode==='gas'?1:0)}${mode==='gas'?'m³':'元'}</div></div>
+<div class="sc"><div class="sv">${mode==='gas'?y2Total.toFixed(1):'¥'+y2Cost.toFixed(0)}</div><div class="sl">去年同期${mode==='gas'?'用水量':'费用'}</div></div>
 <div class="sc"><div class="sv">${ld.balance!==null?'¥'+ld.balance.toFixed(2):'--'}</div><div class="sl">余额</div></div>
-<div class="sc"><div class="sv">${ld.usage!==null?ld.usage.toFixed(1)+'m³':'--'}</div><div class="sl">${ld.period||'最近一期'}用水</div></div>
-<div class="sc"><div class="sv">${ld.bill!==null?'¥'+ld.bill.toFixed(1):'--'}</div><div class="sl">${ld.period||'最近一期'}费用</div></div>
+<div class="sc"><div class="sv">${ld.usage!==null?ld.usage.toFixed(1)+'m³':'--'}</div><div class="sl">${periodLabel}用水</div></div>
+<div class="sc"><div class="sv">${ld.bill!==null?'¥'+ld.bill.toFixed(1):'--'}</div><div class="sl">${periodLabel}费用</div></div>
 </div>
 ${ld.step1Shangxian!==null?(() => {
   const s1Limit = ld.step1Shangxian;
@@ -454,7 +457,6 @@ ${ld.step1Shangxian!==null?(() => {
 <div class="f">
 <div class="fr"><span>${y1}年用水总计</span><span class="fv">${y1Total.toFixed(1)} m³</span></div>
 <div class="fr"><span>${y1}年费用</span><span class="fv">¥${y1Cost.toFixed(0)}</span></div>
-${ld.currentStep?`<div class="fr"><span>当前阶梯</span><span class="fv">${ld.currentStep}</span></div>`:''}
 ${ld.status?`<div class="fr"><span>集成状态</span><span class="fv" style="color:${ld.status==='normal'||ld.status==='正常'?'#4caf50':'#f44336'}">${ld.status}</span></div>`:''}
 </div>`:''}
 </div></ha-card></div>`;
