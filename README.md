@@ -117,3 +117,12 @@ v4.2.0 提供专用 Lovelace 卡片，双年对比、阶梯进度、悬浮提示
 
 ### 更早版本
 详见 [GitHub Releases](https://github.com/C3H3-AI/ha-wenzhou-water/releases)
+
+## 💝 赞助
+
+如果这个集成帮到了你，欢迎请我喝杯咖啡 ☕
+
+| 微信支付 | 支付宝 |
+|:--------:|:------:|
+| ![微信](sponsor/wechat.jpg) | ![支付宝](sponsor/alipay.jpg) |
+
