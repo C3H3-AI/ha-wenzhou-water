@@ -1,6 +1,7 @@
 {
   "domain": "wenzhou_water",
   "name": "温州水务",
+  "after_dependencies": ["recorder"],
   "codeowners": ["@C3H3-AI"],
   "config_flow": true,
   "dependencies": [],
