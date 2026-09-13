@@ -1,12 +1,14 @@
 {
   "domain": "wenzhou_water",
   "name": "温州水务",
-  "version": "4.2.1",
-  "config_flow": true,
-  "documentation": "https://github.com/C3H3-AI/ha-wenzhou-water",
-  "requirements": ["aiohttp"],
-  "authors": ["@C3H3-AI"],
+  "after_dependencies": ["recorder"],
   "codeowners": ["@C3H3-AI"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/C3H3-AI/ha-wenzhou-water",
   "integration_type": "device",
-  "iot_class": "cloud_polling"
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/C3H3-AI/ha-wenzhou-water/issues",
+  "requirements": ["aiohttp"],
+  "version": "4.2.1"
 }
